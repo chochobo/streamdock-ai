@@ -2,6 +2,7 @@
   "name": "streamdock-ai",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Local AI agent status dashboard for Mirabox StreamDock",
   "scripts": {
