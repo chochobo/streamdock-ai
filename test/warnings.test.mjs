@@ -76,3 +76,13 @@ test('public form keeps string warnings with a parallel code array', () => {
   assert.equal(warningCode(null), 'unknown');
   assert.equal(warningMessage({ code: 'x' }), '');
 });
+
+test('the native diagnostics report maps every warning code to the same category', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const swift = await readFile(new URL('../native/App/DiagnosticsReport.swift', import.meta.url), 'utf8');
+  const start = swift.indexOf('= [', swift.indexOf('warningCategories'));
+  const block = swift.slice(start, swift.indexOf('\n    ]', start));
+  const mapped = Object.fromEntries([...block.matchAll(/"([a-z_]+)":\s*"([a-z]+)"/g)].map(m => [m[1], m[2]]));
+  const expected = Object.fromEntries(Object.entries(WARNING_CODES).map(([code, info]) => [code, info.category]));
+  assert.deepEqual(mapped, expected);
+});
