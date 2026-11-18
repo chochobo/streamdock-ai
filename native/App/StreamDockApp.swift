@@ -197,7 +197,8 @@ private struct DeviceView: View {
                                 ForEach(deck.keys, id: \.index) { key in
                                     Button { Task { await client.press(key) } } label: {
                                         KeyPreview(key: key, frame: deck.frames?.first(where: { $0.index == key.index }) ?? deck.keyFrames?.first(where: { $0.index == key.index }),
-                                               isSummary: layout.summaryKeys.contains(key.index))
+                                               isSummary: layout.summaryKeys.contains(key.index),
+                                               language: client.state?.settings?.language)
                                             .frame(width: keySize, height: keySize)
                                     }
                                     .buttonStyle(.plain)
@@ -208,6 +209,7 @@ private struct DeviceView: View {
                             .frame(width: gridWidth, height: gridHeight, alignment: .topLeading)
                             if hasSide {
                                 SidePreview(slots: layout.sideSlots, frames: deck.sideFrames, summary: client.state?.summary,
+                                            language: client.state?.settings?.language,
                                             rowHeight: keySize * sideHeightRatio,
                                             rowSpacing: rowSpacing * sideHeightRatio,
                                             clockOffset: clockOffset)
@@ -262,6 +264,7 @@ private struct KeyPreview: View {
     var key: DeckKey
     var frame: PreviewFrame?
     var isSummary = false
+    var language: String?
 
     private var color: Color {
         switch key.state {
@@ -287,7 +290,7 @@ private struct KeyPreview: View {
                 if let image = frame?.image {
                     Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 8))
                 } else if isSummary {
-                    Text("요약").font(.system(size: min(13, geo.size.width * 0.14), weight: .semibold))
+                    Text(PreviewText.summaryKeyPlaceholder(language: language)).font(.system(size: min(13, geo.size.width * 0.14), weight: .semibold))
                         .foregroundStyle(.white.opacity(0.35))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -328,6 +331,7 @@ private struct SidePreview: View {
     var slots: [Int]
     var frames: [PreviewFrame]?
     var summary: DeckSummary?
+    var language: String?
     var rowHeight: CGFloat
     var rowSpacing: CGFloat
     var clockOffset: CGFloat
@@ -362,12 +366,7 @@ private struct SidePreview: View {
     }
 
     private func sideText(_ slot: Int) -> Text {
-        guard let summary else { return Text("확인 중") }
-        switch slot {
-        case 16: return Text("작업 \(summary.working ?? 0)\n확인 \(summary.blocked ?? 0)\n완료 \(summary.done ?? 0)")
-        case 17: return Text(summary.warning == true ? "알림 확인" : (summary.attentionProject ?? "알림 없음"))
-        default: return Text("갱신\n\(summary.time ?? "--:--")")
-        }
+        Text(PreviewText.side(slot: slot, summary: summary, language: language))
     }
 }
 
