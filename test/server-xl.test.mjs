@@ -169,3 +169,14 @@ test('native preview on an XL shows summary key frames and no side frames', { ti
   assert.equal(publicState.deck.layout.model, 'xl');
   assert.equal(publicState.deck.keyFrames, undefined);
 });
+
+test('an unknown STREAMDOCK_MODEL falls back to the 293S instead of stopping the backend', { timeout: 30000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'streamdock-bad-model-'));
+  const port = await freePort(), base = `http://127.0.0.1:${port}`;
+  const env = { ...baseEnv(home), PORT: String(port), STREAMDOCK_MODEL: 'not-a-model' };
+  const child = spawn(process.execPath, ['src/server.mjs'], { cwd: root, env, stdio: 'ignore' });
+  t.after(async () => { await stopChild(child); await rm(home, { recursive: true, force: true }); });
+  const state = await until(() => status(base), s => s.deck?.layout?.model);
+  assert.equal(state.deck.layout.model, '293sv3');
+  assert.equal(state.deck.keys.length, 15);
+});

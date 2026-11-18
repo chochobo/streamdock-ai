@@ -146,7 +146,11 @@ struct DeckLayout: Decodable, Equatable {
     /// A partial or malformed layout must not discard the whole status. Missing
     /// grid fields decode as 0 so `DeckState.deckLayout` falls back to the 293S.
     init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard let c = try? decoder.container(keyedBy: CodingKeys.self) else {
+            // Not an object: keep the rest of the status and fall back to the 293S.
+            model = ""; name = ""; cols = 0; rows = 0; keyCount = 0; sideSlots = []; summaryKeys = []; controls = nil
+            return
+        }
         model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? ""
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         cols = (try? c.decodeIfPresent(Int.self, forKey: .cols)) ?? 0

@@ -52,7 +52,16 @@ let nativeSummaryFrames = [];
 // The connected device decides the layout. Before one is detected, use
 // STREAMDOCK_MODEL, else the 293S V3. device.profile() keeps the last
 // detected model while disconnected, so the layout follows it.
-const initialProfile = process.env.STREAMDOCK_MODEL ? profileById(process.env.STREAMDOCK_MODEL) : PROFILES[DEFAULT_PROFILE_ID];
+function startupProfile(value) {
+  if (!value) return PROFILES[DEFAULT_PROFILE_ID];
+  try { return profileById(value); }
+  catch {
+    // A typo must not stop the backend; the connected device still selects its own profile.
+    console.error(`STREAMDOCK_MODEL 값을 알 수 없어 기본 모델(293S V3)을 씁니다. 사용할 수 있는 값: ${Object.keys(PROFILES).join(', ')}`);
+    return PROFILES[DEFAULT_PROFILE_ID];
+  }
+}
+const initialProfile = startupProfile(process.env.STREAMDOCK_MODEL);
 let layout = layoutFor(initialProfile);
 let nativeKeyCache = Array(layout.keyCount).fill(null);
 const nativeProviders = nativeToken ? createNativeProviderSettings() : null;
@@ -151,10 +160,20 @@ const sound = createSoundController();
 const settings = createSettings();
 let settingsWarning = null;
 let settingsError = null;
+// Only shapes the validator produces: a list of strings/numbers/booleans or an integer range.
+function publicAllowed(allowed) {
+  if (Array.isArray(allowed)) return allowed.filter(v => ['string', 'number', 'boolean'].includes(typeof v)).slice(0, 32).map(v => (typeof v === 'string' ? v.slice(0, 80) : v));
+  if (allowed && typeof allowed === 'object') {
+    const range = {};
+    for (const key of ['type', 'min', 'max', 'nullable']) if (['string', 'number', 'boolean'].includes(typeof allowed[key])) range[key] = allowed[key];
+    return range;
+  }
+  return typeof allowed === 'string' ? allowed.slice(0, 80) : null;
+}
 // Only the validator's own fields leave the server: never file paths or raw user values.
 function publicSettingsError(error) {
   if (!(error instanceof SettingsError)) return { code: 'settings_unreadable', field: null, allowed: null, message: '설정을 읽지 못했습니다.' };
-  return { code: String(error.code), field: typeof error.field === 'string' ? error.field.slice(0, 80) : null, allowed: error.allowed ?? null, message: String(error.message).slice(0, 300) };
+  return { code: String(error.code), field: typeof error.field === 'string' ? error.field.slice(0, 80) : null, allowed: publicAllowed(error.allowed), message: String(error.message).slice(0, 300) };
 }
 let updateConfig = await readUpdateConfig();
 let updater = createUpdater({ remoteUrl: updateConfig.remoteUrl || null, branch: updateConfig.branch || 'main' });
@@ -182,6 +201,8 @@ let gameFrame = null;
 let sceneFrame = null;
 // Key test screen (settings): { last: {index, code, row, col, slot, at} | null, count }.
 let keyTest = null;
+// The key test only exists on top of the feature router; one definition for every check.
+const keyTestActive = () => Boolean(keyTest) && displayOwner === 'router';
 const keyTestImages = new Map();
 let animationPending = false;
 const gameInputs = [];
@@ -554,6 +575,8 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
       const usage = translateUsage(usageSnapshot, settings.get().language || 'ko');
       const serviceWarnings = [...(result.warnings || []), ...(settingsWarning ? [settingsWarning] : [])];
       syncLayout();
+      // Leaving the router by any path ends the key test, so it cannot linger hidden.
+      if (keyTest && displayOwner !== 'router') { keyTest = null; keyTestImages.clear(); }
       const basePlan = deck.plan(agents, usage, layout);
       let plan = basePlan;
       if (displayOwner === 'router') {
@@ -597,7 +620,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
       try {
         let rendered = true;
         if (!layoutCurrent()) rendered = false;
-        else if (!keyTest && renderKey !== lastRender) rendered = await device.render(plan.keys);
+        else if (!keyTestActive() && renderKey !== lastRender) rendered = await device.render(plan.keys);
         const activeGame = displayOwner === 'router' && router.current() === 'games' && gameFrame;
         const activeScene = displayOwner === 'router' && router.current() === 'scenes' && sceneFrame;
         const frame = activeScene || activeGame;
@@ -625,7 +648,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
         const scoped = agents.filter(a => !a.isSubagent && (basePlan.scope === 'history' ? a.presence !== 'live' : a.presence === 'live') && (displayOwner !== 'deck' || basePlan.view !== 'sessions' || a.projectId === basePlan.project?.id));
         const summary = { ...buildSummary(scoped, updatedAt, [...serviceWarnings, ...(feedbackError ? [warning('action_failed', feedback)] : [])]), language };
         nativeSummary = nativeToken ? summary : null;
-        const showSummary = !activeGame && !activeScene && !keyTest;
+        const showSummary = !activeGame && !activeScene && !keyTestActive();
         if (showSummary && nativeToken) {
           try { nativeSideFrames = await nativeSummarySideFrames(summary); } catch { nativeSideFrames = []; }
         }
@@ -713,7 +736,9 @@ async function press(index, revision, heldMs = 0, inputCode = null) {
   try {
     if (committedOwner === 'router' && keyTest) {
       // Every key is tested; only holding the exit key leaves.
-      if (index === keyTestExitIndex(PROFILES[layout.model]) && heldMs >= KEY_TEST_EXIT_HOLD_MS) {
+      // Physical keys must hold to exit so every key can be tested. The app sends
+      // a revision and has no hold gesture, so its press on the exit key exits.
+      if (index === keyTestExitIndex(PROFILES[layout.model]) && (heldMs >= KEY_TEST_EXIT_HOLD_MS || revision !== undefined)) {
         keyTest = null;
         keyTestImages.clear();
         lastRender = '';
@@ -1198,7 +1223,7 @@ const server = http.createServer(async (req, res) => {
       if (req.headers.origin !== `http://${host}`) return send(res, 403, { error: 'Invalid origin' });
       const usage = await refreshUsage();
       await refresh();
-      return send(res, 200, { ok: true, usage });
+      return send(res, 200, { ok: true, usage: translateUsage(usage, settings.get().language || 'ko') });
     }
     if (req.method === 'GET' && url.pathname === '/api/parcel-import-review') {
       if (req.headers['x-streamdock-review'] !== '1') return send(res, 403, { error: 'Review header required' });
