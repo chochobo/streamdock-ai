@@ -2,20 +2,23 @@
 # Selection only. This script never accesses a private key or changes Keychain.
 # Arguments: security(1) output, existing pin, requested fingerprint, allow change.
 # stdout contains only the selected SHA-1 fingerprint.
+# Automatic choice: exactly one Apple Development identity. Any other valid
+# code-signing identity (Developer ID, self-signed local certificate) must be
+# named explicitly by fingerprint or already be pinned in the existing app.
 native_select_signing_identity() {
   local listing="$1" pinned="$2" requested="$3" allow_change="$4"
-  local line id kind candidate="" count=0 match_re
+  local line id label candidate="" count=0 match_re
   local seen=' ' valid=' ' development=''
-  match_re='^[[:space:]]*[0-9]+\)[[:space:]]+([[:xdigit:]]{40})[[:space:]]+"(Apple Development|Developer ID Application):'
+  match_re='^[[:space:]]*[0-9]+\)[[:space:]]+([[:xdigit:]]{40})[[:space:]]+"([^"]*)"'
   while IFS= read -r line; do
     if [[ "$line" =~ $match_re ]]; then
       id="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')"
-      kind="${BASH_REMATCH[2]}"
+      label="${BASH_REMATCH[2]}"
       case "$seen" in
         *" $id "*) ;;
         *)
           seen="$seen$id "; valid="$valid$id "
-          if [[ "$kind" == 'Apple Development' ]]; then
+          if [[ "$label" == 'Apple Development:'* ]]; then
             development="$id"; count=$((count + 1))
           fi
           ;;
@@ -49,6 +52,19 @@ native_select_signing_identity() {
   printf '%s\n' "$candidate"
 }
 
+# A stable designated requirement names the bundle and either chains to Apple
+# or pins the exact leaf certificate (self-signed local identity). A cdhash
+# requirement changes on every build and would reset macOS permissions.
+# Arguments: requirement text, SHA-1 fingerprint of the signing identity.
+native_requirement_is_stable() {
+  local requirement="$1" fingerprint
+  fingerprint="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
+  [[ "$requirement" == *'identifier "local.streamdock.ai"'* ]] || return 1
+  [[ "$requirement" != *'cdhash'* ]] || return 1
+  [[ "$requirement" == *'anchor apple generic'* ]] && return 0
+  [[ "$fingerprint" =~ ^[[:xdigit:]]{40}$ && "$requirement" == *"certificate leaf = H\"$fingerprint\""* ]]
+}
+
 # Only the existing ad-hoc app can migrate without a prior certificate pin.
 # A certificate-signed app with a missing pin is not treated as a fresh install.
 native_validate_existing_requirement() {
@@ -62,7 +78,7 @@ native_validate_existing_requirement() {
       printf '기존 인증서 서명 앱의 고정 지문이 없습니다. 자동으로 전환하지 않습니다.\n' >&2
       return 1
     fi
-  elif [[ "$requirement" == *'cdhash'* || "$requirement" != *'anchor apple generic'* || "$requirement" != *'identifier "local.streamdock.ai"'* ]]; then
+  elif ! native_requirement_is_stable "$requirement" "$pinned"; then
     printf '기존 앱의 인증서 서명 요구조건이 올바르지 않습니다.\n' >&2
     return 1
   fi

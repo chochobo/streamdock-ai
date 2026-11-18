@@ -127,7 +127,7 @@ fi
 /usr/bin/codesign --force --deep --timestamp=none --sign "$signing_identity" "$app" >/dev/null
 /usr/bin/codesign --verify --deep --strict "$app"
 requirement="$(/usr/bin/codesign --display --requirements - "$app" 2>&1)"
-if [[ "$requirement" != *'identifier "local.streamdock.ai"'* || "$requirement" != *'anchor apple generic'* || "$requirement" == *'cdhash'* ]]; then
+if ! native_requirement_is_stable "$requirement" "$signing_identity"; then
   printf '안정적인 앱 서명 요구조건을 확인하지 못했습니다. 기존 앱은 변경하지 않았습니다.\n' >&2
   exit 1
 fi
