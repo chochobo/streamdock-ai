@@ -99,15 +99,17 @@ CI(`.github/workflows/ci.yml`)에는 두 잡이 있다.
 
 | 잡 | 러너 | 내용 |
 |---|---|---|
-| `test` | ubuntu | `npm ci`(락파일 검증 겸용) + Pillow 설치 + `npm test` |
-| `native` | macOS | `npm run test:native`(Swift HID `swift test` + `native/Tests/run-*.sh`) + macOS 전용 Node 테스트 |
+| `test` | macOS | `npm ci`(락파일 검증 겸용) + Pillow 설치 + `npm test` |
+| `native` | macOS | `npm run test:native`(Swift HID `swift test` + `native/Tests/run-*.sh`) |
+
+두 잡 모두 macOS 러너다. 장치 화면 테스트가 macOS 시스템 글꼴 폭을 기준으로 글자 잘림을 검사하기 때문이다(ubuntu에서는 6개가 실패한다). 앱도 macOS 전용이다.
 
 로컬에서는 같은 기준을 **한 명령**으로 확인한다: `npm run check`. 게임·장면 테스트에는 Python 3와 Pillow가 필요하다(`python3 -m pip install Pillow`). Pillow가 없으면 장면 테스트 4개가 실패한다.
 
 **진짜 CI 전용은 작업 트리에서 원리적으로 드러나지 않는 것뿐이다.**
 
 - **커밋 누락** — CI의 checkout은 커밋된 것만 가져온다. `git add`를 빠뜨린 파일은 로컬 검사로 잡을 수 없다
-- **개발 머신과 다른 환경** — 파일명 대소문자. macOS(APFS)는 구분하지 않고 ubuntu 러너는 구분한다
+- **개발 머신과 다른 환경** — 깨끗한 러너에서의 설치(`npm ci`)와 의존성 누락. 두 잡이 모두 macOS라 파일명 대소문자 오타는 CI에서도 잡히지 않는다
 
 ### CI 밖 게이트
 

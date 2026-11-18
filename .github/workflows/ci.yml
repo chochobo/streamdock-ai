@@ -7,7 +7,9 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # macOS 러너: 장치 화면 렌더링 테스트가 macOS 시스템 글꼴(sans-serif) 폭을 기준으로
+    # 잘림을 검사한다. ubuntu 에서는 글꼴이 달라 6개가 실패한다 — 앱도 macOS 전용이다
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -30,14 +32,5 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - name: 의존성 설치
-        run: npm ci
       - name: Swift 테스트
         run: npm run test:native
-      - name: macOS 전용 Node 테스트
-        # ubuntu 잡에서는 platform 조건으로 건너뛰므로 여기서 돌린다
-        run: node --test test/native-lifecycle.test.mjs
