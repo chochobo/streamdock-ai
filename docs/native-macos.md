@@ -15,7 +15,14 @@ open build/native/StreamDockAI.app
 
 빌드는 Node 실행 파일, 백엔드와 네이티브 모듈을 앱에 복사합니다. 기존에 만든 앱이 있으면 삭제하지 않고 `build/native`에 이름을 바꿔 보관합니다. 이 Mac의 유효한 Apple Development 서명 신원이 하나일 때 자동으로 선택하며, 인증서 지문을 앱에 기록해 다음 빌드에서도 같은 신원을 사용합니다. 신원이 없거나 여러 개면 명시하지 않은 다른 인증서나 임시 서명으로 전환하지 않고 빌드를 중단합니다. 다른 Mac에 배포할 때 필요한 서명·공증이나 범용 아키텍처 지원은 별도로 확인해야 합니다.
 
-기존 앱을 건드리지 않고 검토용으로 빌드하려면 `scripts/native-build.sh --stage-only`를 실행하세요. 서로 다른 신원을 선택해야 할 때는 `STREAMDOCK_SIGN_IDENTITY`에 유효한 인증서의 40자리 지문을 명시할 수 있습니다. 기존에 고정한 신원과 다르면 의도적인 전환을 위해 `STREAMDOCK_ALLOW_SIGNING_IDENTITY_CHANGE=1`도 필요합니다. 인증서 만료·삭제·변경 시 빌드가 중단될 수 있으며, 다른 신원으로 전환하면 macOS 권한 재허용이 필요할 수 있습니다. 키체인 접근 설정은 변경하지 않습니다.
+기존 앱을 건드리지 않고 검토용으로 빌드하려면 `scripts/native-build.sh --stage-only`를 실행하세요. 서로 다른 신원을 선택해야 할 때는 `STREAMDOCK_SIGN_IDENTITY`에 유효한 인증서의 40자리 지문을 명시할 수 있습니다. 이 방법으로 키체인에 직접 만든 자체 서명 코드 서명 인증서도 사용할 수 있습니다. 이때 앱의 서명 요구조건은 그 인증서 하나에 고정되므로, 같은 인증서로 계속 빌드하면 macOS 권한이 유지됩니다. 자체 서명 인증서는 자동으로 선택하지 않습니다.
+
+```sh
+security find-identity -v -p codesigning   # 40자리 지문 확인
+STREAMDOCK_SIGN_IDENTITY=<지문> ./scripts/native-build.sh
+```
+
+첫 빌드 뒤에는 지문이 앱에 기록되므로 다음 빌드부터는 환경 변수 없이 같은 인증서를 사용합니다. 기존에 고정한 신원과 다르면 의도적인 전환을 위해 `STREAMDOCK_ALLOW_SIGNING_IDENTITY_CHANGE=1`도 필요합니다. 인증서 만료·삭제·변경 시 빌드가 중단될 수 있으며, 다른 신원으로 전환하면 macOS 권한 재허용이 필요할 수 있습니다. 키체인 접근 설정은 변경하지 않습니다.
 
 게임과 화면보호기는 현재 Mac에 설치된 Python과 Pillow를 사용합니다. 이 두 구성 요소를 삭제하거나 옮기면 해당 기능이 동작하지 않을 수 있습니다. Python 자체는 앱에 포함하지 않습니다.
 
