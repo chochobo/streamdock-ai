@@ -284,7 +284,7 @@ async function officialAppRunning() {
  * onKey(index): receives a zero-based row-major position on a key press.
  * onKeyEvent(index, phase, heldMs, code): down/up/cancel; durations are monotonic and bounded.
  * code is the raw input code for down/up (undefined for cancel).
- * onControl({control, action, phase}): a rocker press (XL only): control left|right,
+ * onControl({control, action, phase, code}): a rocker press (XL only): control left|right,
  *   action up|down|push, phase 'down'. A held rocker fires once until released.
  * renderImages({keys, sides}) writes supplied PNG/JPEG buffers only, converted to the model's size.
  * render accepts [{index, label, state, estimated}]. status distinguishes HID connection
@@ -342,7 +342,7 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
       if (control.phase === 'up') { heldControls.delete(control.code); return; }
       if (heldControls.has(control.code)) return;
       heldControls.add(control.code);
-      invoke(onControl, { control: control.control, action: control.action, phase: 'down' });
+      invoke(onControl, { control: control.control, action: control.action, phase: 'down', code: control.code });
       return;
     }
     const event = keyEventFromReport(data, profile);

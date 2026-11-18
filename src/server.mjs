@@ -423,7 +423,16 @@ async function rockerAction(control, action) {
   return { ok: false, code: 'empty' };
 }
 
-function handleRocker({ control, action } = {}) {
+function handleRocker({ control, action, code } = {}) {
+  // The key test screen records rockers instead of acting on them, so their
+  // physical direction can be checked against ROCKERS_XL.
+  if (committedOwner === 'router' && keyTest) {
+    if (actionBusy) return;
+    actionBusy = true;
+    keyTest = { count: keyTest.count + 1, last: { index: null, rocker: String(control), action: String(action), code: Number.isInteger(code) ? code : null, at: new Date().toISOString() } };
+    void refresh(true).catch(() => {}).finally(() => { actionBusy = false; });
+    return;
+  }
   const record = result => {
     lastInputOutcome = { control: String(control), action: String(action), code: typeof result?.code === 'string' ? result.code : 'error', at: new Date().toISOString() };
     snapshot = { ...snapshot, lastInput: lastInputOutcome };

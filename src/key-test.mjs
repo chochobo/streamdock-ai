@@ -58,6 +58,13 @@ export function keyTestFrame(profile, state = {}) {
 /** One-line status for the app preview and /api/status. */
 export function keyTestMessage(profile, { last = null, language = 'ko' } = {}) {
   const exit = keyTestExitIndex(profile);
+  if (last?.rocker) {
+    const en = language === 'en';
+    const side = en ? { left: 'left', right: 'right' }[last.rocker] : { left: '왼쪽', right: '오른쪽' }[last.rocker];
+    const move = en ? { up: 'up', down: 'down', push: 'push' }[last.action] : { up: '위', down: '아래', push: '누르기' }[last.action];
+    return en ? `Key test: ${side} rocker ${move} (code ${hex(last.code)}). Hold key ${exit} to exit.`
+      : `키 시험: ${side} 로커 ${move} (입력 코드 ${hex(last.code)}). 나가려면 ${exit}번 키를 길게 누르세요.`;
+  }
   if (language === 'en') return last ? `Key test: key ${last.index} (code ${hex(last.code)}). Hold key ${exit} to exit.` : `Key test: press any key. Hold key ${exit} to exit.`;
   return last ? `키 시험: ${last.index}번 키 (입력 코드 ${hex(last.code)}). 나가려면 ${exit}번 키를 길게 누르세요.` : `키 시험: 아무 키나 누르세요. 나가려면 ${exit}번 키를 길게 누르세요.`;
 }

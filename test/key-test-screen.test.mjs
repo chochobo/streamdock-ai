@@ -163,6 +163,20 @@ export async function resolve(s,c,n){if(s==='node-hid')return {url:hid,shortCirc
       assert.equal(s.deck.keys[index].state, 'working');
       assert.ok(s.deck.message.startsWith(`키 시험: ${index}번 키 `), s.deck.message);
     }
+    if (model === 'xl') {
+      // Rockers are recorded for direction checks and never act (no page change, no brightness).
+      const brightness = (await status(base)).settings?.brightness ?? null;
+      for (const [code, rocker, action] of [[0x21, 'left', 'up'], [0x25, 'right', 'push'], [0x26, 'right', 'down']]) {
+        const before = (await status(base)).keyTest.count;
+        send(code, 'down'); send(code, 'up');
+        const r = await until(() => status(base), s => s.keyTest?.count !== before);
+        assert.equal(r.keyTest?.active, true);
+        assert.deepEqual({ rocker: r.keyTest.last.rocker, action: r.keyTest.last.action, code: r.keyTest.last.code, index: r.keyTest.last.index }, { rocker, action, code, index: null });
+        assert.ok(r.deck.message.startsWith('키 시험: '), r.deck.message);
+        assert.ok(r.deck.message.includes('로커'), r.deck.message);
+      }
+      assert.equal((await status(base)).settings?.brightness ?? null, brightness);
+    }
     // Holding a non-exit key is still just a test press.
     const held = await physical(0, KEY_TEST_EXIT_HOLD_MS + 300);
     assert.equal(held.keyTest?.active, true);
