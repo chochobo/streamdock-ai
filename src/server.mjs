@@ -84,7 +84,7 @@ const device = deviceFactory({ mode, profile: initialProfile, onKeyEvent: (index
     }
     handlePhysicalPress(index, heldMs);
   }
-} });
+}, onControl: event => handleRocker(event) });
 let snapshot = { device: { connected: false, model: '', error: '시작 중' }, agents: [], warnings: [], updatedAt: null, refreshIntervalMs: interval };
 let pending;
 let reconnecting = false;
@@ -340,6 +340,49 @@ function recordPhysicalInput(index, result) {
 
 function handlePhysicalPress(index, heldMs) {
   void press(index, undefined, heldMs).then(result => recordPhysicalInput(index, result)).catch(() => recordPhysicalInput(index, { code: 'error' }));
+}
+
+// XL rockers (#8). Default mapping, change it here:
+// left up/down = the visible prev/next key, left push = the visible back key
+// (each only when that key is shown and enabled); right up/down = brightness
+// ±10 within 0..100, saved like the brightness setting; right push = reserved.
+// Scenes and games ignore rockers.
+const ROCKER_KEYS = { up: 'prev', down: 'next', push: 'back' };
+const ROCKER_BRIGHTNESS_STEP = { up: 10, down: -10 };
+
+async function rockerAction(control, action) {
+  if (reconnecting || legacyFrameActive()) return { ok: false, code: 'ignored' };
+  if (control === 'left' && Object.hasOwn(ROCKER_KEYS, action)) {
+    const key = committedDeck?.keys?.find(k => k.kind === 'control' && !k.disabled && k.action === ROCKER_KEYS[action]);
+    return key ? press(key.index) : { ok: false, code: 'empty' };
+  }
+  if (control === 'right' && Object.hasOwn(ROCKER_BRIGHTNESS_STEP, action)) {
+    if (rendering || actionBusy) return { ok: false, code: 'busy' };
+    if (pending) await pending;
+    if (rendering || actionBusy) return { ok: false, code: 'busy' };
+    actionBusy = true;
+    lastInteraction = Date.now();
+    try {
+      const requested = device.status().requestedBrightness;
+      const current = Number.isInteger(requested) ? requested : settings.get().brightness ?? 100;
+      const value = Math.min(100, Math.max(0, current + ROCKER_BRIGHTNESS_STEP[action]));
+      if (value === current && settings.get().brightness === value) return { ok: true, code: 'unchanged' };
+      const changed = await device.setBrightness(value);
+      if (!changed && device.status().mode !== 'simulator') return { ok: false, code: 'unavailable' };
+      await settings.update({ brightness: value });
+      await refresh(true);
+      return { ok: true, code: 'updated' };
+    } finally { actionBusy = false; }
+  }
+  return { ok: false, code: 'empty' };
+}
+
+function handleRocker({ control, action } = {}) {
+  const record = result => {
+    lastInputOutcome = { control: String(control), action: String(action), code: typeof result?.code === 'string' ? result.code : 'error', at: new Date().toISOString() };
+    snapshot = { ...snapshot, lastInput: lastInputOutcome };
+  };
+  void rockerAction(control, action).then(record).catch(() => record({ code: 'error' }));
 }
 
 function publicReview(value) {

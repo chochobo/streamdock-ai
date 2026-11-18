@@ -12,8 +12,22 @@
 // 293S V3: the same table maps index -> image slot and input code -> index.
 const KEY_IDS_293S = [13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3];
 
+// XL rockers (issue #8): input code -> { rocker, dir }. The vendor SDK names
+// each rocker's inputs left/center/right, Companion names them up/push/down.
+// Which physical direction sends the first code is not verified on hardware
+// yet: swap 'up' and 'down' here if the device shows otherwise.
+const ROCKERS_XL = {
+  0x21: { rocker: 'left', dir: 'up' },
+  0x22: { rocker: 'left', dir: 'push' },
+  0x23: { rocker: 'left', dir: 'down' },
+  0x24: { rocker: 'right', dir: 'up' },
+  0x25: { rocker: 'right', dir: 'push' },
+  0x26: { rocker: 'right', dir: 'down' },
+};
+
 function freeze(profile) {
-  return Object.freeze({ ...profile, productIds: Object.freeze([...profile.productIds]), sideSlots: Object.freeze([...profile.sideSlots]) });
+  const rockers = Object.fromEntries(Object.entries(profile.rockers).map(([code, value]) => [code, Object.freeze({ ...value })]));
+  return Object.freeze({ ...profile, productIds: Object.freeze([...profile.productIds]), sideSlots: Object.freeze([...profile.sideSlots]), rockers: Object.freeze(rockers) });
 }
 
 export const PROFILES = Object.freeze({
@@ -30,6 +44,7 @@ export const PROFILES = Object.freeze({
     rotate: -90,
     // Display-only screens next to the keys, in top-to-bottom order.
     sideSlots: [16, 17, 18],
+    rockers: {},
     slotOf: index => KEY_IDS_293S[index],
     indexOfCode: code => KEY_IDS_293S.indexOf(code),
   }),
@@ -45,10 +60,11 @@ export const PROFILES = Object.freeze({
     imageSize: 80,
     rotate: 180,
     sideSlots: [],
+    rockers: ROCKERS_XL,
     // Image slot 1 is bottom-left; slots run left to right, then upward.
     slotOf: index => (3 - Math.floor(index / 8)) * 8 + (index % 8) + 1,
     // Input code 0x01 is top-left; codes run left to right, then downward.
-    // 0x21-0x26 are the rockers (see issue #8) and are not keys.
+    // 0x21-0x26 are the rockers (see ROCKERS_XL) and are not keys.
     indexOfCode: code => (Number.isInteger(code) && code >= 0x01 && code <= 0x20 ? code - 1 : -1),
   }),
 });
