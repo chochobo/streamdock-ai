@@ -1,0 +1,43 @@
+{
+  "device": {"connected": true, "model": "293sV3", "error": null, "mode": "hardware"},
+  "updatedAt": "2026-11-10T00:00:00.000Z",
+  "warnings": [],
+  "settings": {
+    "version": 1,
+    "language": "ko",
+    "sound": {"enabled": false},
+    "brightness": null,
+    "screensaver": {"enabled": true, "idleMinutes": 15, "scene": "aquarium"}
+  },
+  "agents": [
+    {"id": "fixture-codex-1", "provider": "codex", "project": "sample", "title": "Synthetic task", "presence": "live", "status": "working", "confidence": "inferred", "isSubagent": false},
+    {"id": "fixture-claude-2", "provider": "claude", "project": "sample", "name": null, "presence": "unknown", "status": "unknown", "isSubagent": true}
+  ],
+  "usage": {"accounts": [
+    {"id": "fixture-codex", "provider": "codex", "label": "Codex", "status": "ok", "windows": [
+      {"id": "weekly", "label": "7일", "usedPercent": 25.5, "resetsAt": "2026-11-12T00:00:00Z", "resetLabel": null, "status": "ok"}
+    ]},
+    {"id": "fixture-claude", "provider": "claude", "label": "Claude", "status": "stale", "windows": [
+      {"id": "weekly", "label": "7일", "usedPercent": null, "resetLabel": "금 03:00"}
+    ]}
+  ]},
+  "summary": {"working": 1, "blocked": 0, "done": 0, "unknown": 0, "errors": 0, "estimated": true, "attentionProject": null, "time": "09:00", "warning": false},
+  "deck": {
+    "revision": 42, "view": "feature", "mode": "machines", "scope": "live", "title": "머신", "page": 1, "pages": 1,
+    "keys": [
+      {"index": 0, "label": "메모리 사용", "caption": "약 25%", "detail": "8.0 / 32.0 GB", "state": "idle", "kind": "feature", "action": "none", "disabled": true,
+       "bar": {"value": 25, "direction": "used", "warningAt": 75, "criticalAt": 90, "stale": false},
+       "memory": {"usedBytes": 8589934592, "totalBytes": 34359738368, "estimated": true}},
+      {"index": 1, "label": "Codex", "kind": "quota", "usedPercent": 25.5, "windowLabel": "7일", "resetDate": "11/12", "resetTime": "09:00", "usageStatus": "ok"}
+    ],
+    "frames": [{"index": 0, "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZrWQAAAAASUVORK5CYII="}],
+    "keyFrames": [{"index": 1, "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZrWQAAAAASUVORK5CYII="}],
+    "sideFrames": [{"slot": 16, "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZrWQAAAAASUVORK5CYII="}]
+  },
+  "cleanup": {"stage": "review", "reviewId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "reviewed": false, "plan": {"executable": false, "targets": [{"path": "/tmp/example"}]}},
+  "worktreeReview": {"stage": "review", "reviewId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "plan": {"eligible": false, "path": "/tmp/example"}},
+  "parcelReview": {"stage": "review", "reviewId": "cccccccccccccccccccccccccccccccccccccccccccccccc", "reviewed": false, "plan": {"destination": "Cainiao", "count": 1}},
+  "parcelImportReview": {"stage": "review", "reviewId": "dddddddddddddddddddddddddddddddddddddddddddddddd", "plan": {"source": "fixture", "count": 1}},
+  "remoteReview": {"stage": "review", "reviewId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "reviewed": true, "plan": {"label": "fixture", "operation": "machine"}},
+  "updateReview": {"stage": "unavailable", "message": "설정 필요", "plan": null}
+}

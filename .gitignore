@@ -1,0 +1,23 @@
+# Dependencies and build products
+node_modules/
+build/
+**/.build/
+**/.swiftpm/
+**/__pycache__/
+*.py[cod]
+*.xcuserstate
+
+# Local tooling and operating system files
+.serena/
+.openchrome/
+.DS_Store
+*.log
+
+# Local credentials and environment configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx

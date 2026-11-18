@@ -1,0 +1,6 @@
+{
+  "sources": {
+    "flow": { "enabled": false, "source": "agentdeck-cache" },
+    "higgsfield": { "enabled": false, "source": "agentdeck-cache" }
+  }
+}

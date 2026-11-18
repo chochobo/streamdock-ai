@@ -1,0 +1,11 @@
+{
+  "device": {"connected": false},
+  "agents": [{"id": "fixture-unknown"}],
+  "usage": {"accounts": [{"provider": "codex", "status": "unavailable", "windows": null}]},
+  "settings": null,
+  "summary": {"warning": true},
+  "deck": {"revision": 7, "keys": [{"index": 0, "label": null, "bar": null}], "frames": null, "sideFrames": null},
+  "cleanup": null,
+  "parcelReview": {"stage": "loading", "plan": null},
+  "remoteReview": {"stage": "unavailable", "message": "확인할 수 없습니다."}
+}
