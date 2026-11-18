@@ -326,6 +326,13 @@ function syncLayout() {
   lastSummary = '';
 }
 
+// A reconnect can switch the device model while a refresh is awaiting I/O.
+// Never send a plan built for one model to another; the next refresh re-plans.
+function layoutCurrent() {
+  const profile = typeof device.profile === 'function' ? device.profile() : null;
+  return !profile || profile.id === layout.model;
+}
+
 function recordPhysicalInput(index, result) {
   lastInputOutcome = { index, code: typeof result?.code === 'string' ? result.code : 'error', at: new Date().toISOString() };
   snapshot = { ...snapshot, lastInput: lastInputOutcome };
@@ -449,14 +456,15 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
       let legacyFrames = [];
       try {
         let rendered = true;
-        if (renderKey !== lastRender) rendered = await device.render(plan.keys);
+        if (!layoutCurrent()) rendered = false;
+        else if (renderKey !== lastRender) rendered = await device.render(plan.keys);
         const activeGame = displayOwner === 'router' && router.current() === 'games' && gameFrame;
         const activeScene = displayOwner === 'router' && router.current() === 'scenes' && sceneFrame;
         const frame = activeScene || activeGame;
         const placed = frame ? placeLegacyFrame(frame.tiles.filter(tile => activeScene || tile.index < 10).map(tile => ({ index: tile.index, image: tile.png })),
           activeScene ? frame.sideTiles.map(tile => ({ slot: tile.slot, image: tile.png })) : await gameSideImages(frame), await blankKeyImage()) : null;
         legacyFrames = placed ? placed.keys : [];
-        if (placed && (rendered || device.status().mode === 'simulator')) {
+        if (placed && layoutCurrent() && (rendered || device.status().mode === 'simulator')) {
           nativeSideFrames = nativeFrameUrls(placed.sides);
           const frameRendered = await device.renderImages(placed);
           if (device.status().mode !== 'simulator') rendered = rendered && frameRendered;
@@ -485,7 +493,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
           committedDeck = { ...committedDeck, sideFrames: nativeSideFrames, keyFrames: nativeRenderedKeys };
         }
         const summaryKey = JSON.stringify(summary);
-        if (showSummary && summaryKey !== lastSummary) {
+        if (showSummary && summaryKey !== lastSummary && layoutCurrent()) {
           const summaryRendered = await device.renderSummary(summary);
           if (summaryRendered || device.status().mode === 'simulator') lastSummary = summaryKey;
         }
@@ -1145,7 +1153,7 @@ function blinkAlerts() {
   const language = settings.get().language || 'ko';
   const keys = translateKeys(alerts.decorate(alertPlan).keys, language).map(key => ({ ...key, language }));
   const renderKey = JSON.stringify(keys);
-  if (renderKey === lastRender) return;
+  if (renderKey === lastRender || !layoutCurrent()) return;
   rendering = true;
   blinkPending = (async () => {
     try {
@@ -1171,7 +1179,7 @@ async function animate() {
   animationPending = true;
   try {
     const frame = current === 'games' ? await games.tick() : await scenes.tick();
-    if (closing || reconnecting || actionBusy || rendering || pending || displayOwner !== 'router' || router.current() !== current || (current === 'games' ? gameFrame !== prior : sceneFrame !== prior)) return;
+    if (closing || reconnecting || actionBusy || rendering || pending || displayOwner !== 'router' || router.current() !== current || (current === 'games' ? gameFrame !== prior : sceneFrame !== prior) || !layoutCurrent()) return;
     if (current === 'games') { gameFrame = frame; for (const cue of frame.sounds || []) void sound.play(cue); }
     else sceneFrame = frame;
     rendering = true;

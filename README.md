@@ -1,6 +1,6 @@
 # StreamDock AI
 
-Mirabox StreamDock 293S V3에서 Codex와 Claude Code의 세션, 계정 사용량, Mac 상태를 확인하는 macOS 앱입니다. 프로젝트별로 세션을 묶어 표시하며, 키를 눌러 지원되는 채팅이나 터미널을 열 수 있습니다. SwiftUI 설정 창과 기기 미리보기도 제공합니다.
+Mirabox StreamDock 293S V3와 Stream Dock XL에서 Codex와 Claude Code의 세션, 계정 사용량, Mac 상태를 확인하는 macOS 앱입니다. 프로젝트별로 세션을 묶어 표시하며, 키를 눌러 지원되는 채팅이나 터미널을 열 수 있습니다. SwiftUI 설정 창과 기기 미리보기도 제공합니다.
 
 이 프로젝트는 실험 단계입니다. SwiftUI 앱이 Swift HID로 기기에 연결하고, 앱에 포함된 Node.js 백엔드가 기능을 처리합니다. 전체 기능을 Swift로 전환한 상태는 아닙니다.
 
@@ -20,7 +20,7 @@ Mirabox StreamDock 293S V3에서 Codex와 Claude Code의 세션, 계정 사용�
 - Node.js 22 이상과 npm
 - Python 3와 Pillow. 게임과 장면을 사용하며 앱을 빌드할 때도 필요합니다.
 - 유효한 코드 서명 신원. Apple Development 신원이 하나면 자동으로 사용합니다. 여러 개이거나 직접 만든 자체 서명 인증서(코드 서명용, "항상 신뢰")를 쓰려면 지문을 지정해야 합니다. 서명 신원이 없으면 빌드가 중단됩니다.
-- 실제 기기를 사용하려면 Mirabox StreamDock 293S V3 (`6603:1014`)와 USB 연결. 다른 모델은 지원하지 않습니다.
+- 실제 기기를 사용하려면 Mirabox StreamDock 293S V3 (`6603:1014`) 또는 Stream Dock XL (`5548:1028`, 국제판 `5548:1031`)과 USB 연결. 다른 모델은 지원하지 않습니다. XL 지원은 모의 장치로만 시험했고 실물 확인 전입니다([기기 검증 기록](docs/device-validation.md#stream-dock-xl)).
 
 앱은 현재 Mac의 Python과 Pillow를 사용합니다. 빌드 후에도 Python 환경을 유지하세요. 서명과 빌드의 상세 조건은 [macOS 앱 안내](docs/native-macos.md)를 참고하세요. 배포용 서명·공증과 다른 Mac에서의 동작은 별도로 확인해야 합니다.
 

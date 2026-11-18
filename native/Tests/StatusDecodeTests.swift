@@ -62,6 +62,10 @@ private func check(_ condition: @autoclosure () -> Bool, _ message: String) thro
         let badLayout = Data(#"{"device":{"connected":true},"deck":{"revision":1,"keys":[],"layout":{"model":"x","name":"X","cols":0,"rows":0,"keyCount":0,"sideSlots":[],"summaryKeys":[]}}}"#.utf8)
         let badState = try decoder.decode(DashboardState.self, from: badLayout)
         try check(badState.deck?.deckLayout == .s293, "unusable layout falls back to 293S")
+        let partialLayout = Data(#"{"device":{"connected":true,"model":"Stream Dock XL (5548:1028)"},"deck":{"revision":2,"keys":[{"index":0}],"layout":{"model":"xl","name":"Stream Dock XL","cols":8,"rows":"4"}}}"#.utf8)
+        let partialLayoutState = try decoder.decode(DashboardState.self, from: partialLayout)
+        try check(partialLayoutState.deck?.keys.count == 1 && partialLayoutState.device.connected, "partial layout keeps the rest of the status")
+        try check(partialLayoutState.deck?.deckLayout == .s293, "partial layout falls back to 293S")
 
         let structuredPermission = Data(#"{"device":{"connected":false},"usage":{"issues":[{"provider":"claude-desktop","code":"permission_required"}]}}"#.utf8)
         let structuredState = try decoder.decode(DashboardState.self, from: structuredPermission)
