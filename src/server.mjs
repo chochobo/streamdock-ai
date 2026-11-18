@@ -19,6 +19,7 @@ import { readClaudeUsage } from './usage-claude.mjs';
 import { createClaudeDesktopUsageProvider } from './usage-claude-desktop.mjs';
 import { createGameBridge } from './game-bridge.mjs';
 import { createSceneBridge } from './scene-bridge.mjs';
+import { KEY_TEST_EXIT_HOLD_MS, keyTestExitIndex, keyTestFrame, keyTestMessage } from './key-test.mjs';
 import { createSoundController } from './sound.mjs';
 import { createRemoteProvider } from './remote.mjs';
 import { readCredits } from './credits.mjs';
@@ -64,9 +65,14 @@ const parcelImporter = createParcelImport();
 const immediateKeys = new Set();
 const swiftHidPath = mode === 'hardware' ? process.env.STREAMDOCK_SWIFT_HID_PATH : undefined;
 const deviceFactory = swiftHidPath ? options => createNativeDevice({ ...options, helperPath: swiftHidPath }) : createDevice;
-const device = deviceFactory({ mode, profile: initialProfile, onKeyEvent: (index, action, heldMs) => {
+const device = deviceFactory({ mode, profile: initialProfile, onKeyEvent: (index, action, heldMs, code) => {
   if (reconnecting) { immediateKeys.delete(index); return; }
   if (action === 'cancel') { immediateKeys.delete(index); return; }
+  // The key test screen tests every key, summary keys included.
+  if (keyTest && displayOwner === 'router') {
+    if (action === 'up' && Number.isInteger(index) && index >= 0 && index < layout.keyCount) handlePhysicalPress(index, heldMs, code);
+    return;
+  }
   // Summary keys have no action; scenes and games only use the legacy area.
   if (!Number.isInteger(index) || index < 0 || index >= layout.keyCount || layout.summaryKeys.includes(index) ||
       (legacyFrameActive() && !layout.legacy.keys.includes(index))) { immediateKeys.delete(index); return; }
@@ -153,6 +159,9 @@ let cleanupState = null, cleanupPending;
 let worktreeReview = null, worktreePending;
 let gameFrame = null;
 let sceneFrame = null;
+// Key test screen (settings): { last: {index, code, row, col, slot, at} | null, count }.
+let keyTest = null;
+const keyTestImages = new Map();
 let animationPending = false;
 const gameInputs = [];
 let gameInputDraining = false;
@@ -284,6 +293,28 @@ function legacyFrameActive() {
   return displayOwner === 'router' && ((router.current() === 'games' && gameFrame) || (router.current() === 'scenes' && sceneFrame));
 }
 
+// Key test images for the connected device, cached by SVG (the device
+// skips unchanged images itself).
+async function keyTestPlaced(language) {
+  const profile = PROFILES[layout.model];
+  const frame = keyTestFrame(profile, { last: keyTest.last, count: keyTest.count, language });
+  const png = async svg => {
+    if (!keyTestImages.has(svg)) keyTestImages.set(svg, await sharp(Buffer.from(svg)).png().toBuffer());
+    return keyTestImages.get(svg);
+  };
+  if (keyTestImages.size > 256) keyTestImages.clear();
+  return {
+    keys: await Promise.all(frame.keys.map(async key => ({ index: key.index, image: await png(key.svg) }))),
+    sides: await Promise.all(frame.sides.map(async side => ({ slot: side.slot, image: await png(side.svg) }))),
+  };
+}
+
+function publicKeyTest() {
+  if (!keyTest) return null;
+  const profile = PROFILES[layout.model];
+  return { active: true, model: layout.model, exitIndex: keyTestExitIndex(profile), exitHoldMs: KEY_TEST_EXIT_HOLD_MS, count: keyTest.count, last: keyTest.last };
+}
+
 // Router layout while a scene or game frame is shown: its 15 positions are
 // the legacy area, so controls sit where the 293S frame expects them.
 function legacyRouterLayout() {
@@ -338,8 +369,8 @@ function recordPhysicalInput(index, result) {
   snapshot = { ...snapshot, lastInput: lastInputOutcome };
 }
 
-function handlePhysicalPress(index, heldMs) {
-  void press(index, undefined, heldMs).then(result => recordPhysicalInput(index, result)).catch(() => recordPhysicalInput(index, { code: 'error' }));
+function handlePhysicalPress(index, heldMs, code) {
+  void press(index, undefined, heldMs, code).then(result => recordPhysicalInput(index, result)).catch(() => recordPhysicalInput(index, { code: 'error' }));
 }
 
 // XL rockers (#8). Default mapping, change it here:
@@ -499,7 +530,13 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
           { id: 'parcel-cancel', label: '취소', caption: '돌아가기', detail: '배송 조회를 취소합니다.', state: 'idle', kind: 'feature', action: 'parcels:cancel' },
         ];
         const framed = (active === 'games' && gameFrame) || (active === 'scenes' && sceneFrame);
-        plan = router.planPage({ items, availability: featureAvailability, layout: framed ? legacyRouterLayout() : layout });
+        plan = router.planPage({ items: keyTest ? [] : items, availability: featureAvailability, layout: framed ? legacyRouterLayout() : layout });
+        if (keyTest) {
+          // Every key is intercepted by press(); the plan only names them for the preview.
+          const profile = PROFILES[layout.model];
+          plan = { ...plan, title: '키 시험', keys: plan.keys.map(key => ({ index: key.index, id: `keytest-${key.index}`, kind: 'feature', state: keyTest.last?.index === key.index ? 'working' : 'idle',
+            label: String(key.index), caption: `slot ${profile.slotOf(key.index)}`, detail: `r${Math.floor(key.index / layout.cols)} c${key.index % layout.cols}`, action: 'keytest', disabled: false })) };
+        }
       }
       const language = settings.get().language || 'ko';
       if (displayOwner === 'deck') plan = alerts.decorate(plan);
@@ -515,11 +552,11 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
       try {
         let rendered = true;
         if (!layoutCurrent()) rendered = false;
-        else if (renderKey !== lastRender) rendered = await device.render(plan.keys);
+        else if (!keyTest && renderKey !== lastRender) rendered = await device.render(plan.keys);
         const activeGame = displayOwner === 'router' && router.current() === 'games' && gameFrame;
         const activeScene = displayOwner === 'router' && router.current() === 'scenes' && sceneFrame;
         const frame = activeScene || activeGame;
-        const placed = frame ? placeLegacyFrame(frame.tiles.filter(tile => activeScene || tile.index < 10).map(tile => ({ index: tile.index, image: tile.png })),
+        const placed = keyTest && displayOwner === 'router' ? await keyTestPlaced(language) : frame ? placeLegacyFrame(frame.tiles.filter(tile => activeScene || tile.index < 10).map(tile => ({ index: tile.index, image: tile.png })),
           activeScene ? frame.sideTiles.map(tile => ({ slot: tile.slot, image: tile.png })) : await gameSideImages(frame), await blankKeyImage()) : null;
         legacyFrames = placed ? placed.keys : [];
         if (placed && layoutCurrent() && (rendered || device.status().mode === 'simulator')) {
@@ -535,6 +572,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
           committedOwner = displayOwner;
           alertPlan = displayOwner === 'deck' ? basePlan : null;
           committedDeck = { ...committed, revision: globalRevision, scope: basePlan.scope, projects: basePlan.projects, layout: publicLayout(layout),
+            ...(keyTest && displayOwner === 'router' ? { message: keyTestMessage(PROFILES[layout.model], { last: keyTest.last, language }) } : {}),
             ...(legacyFrames.length ? { frames: legacyFrames.map(tile => ({ index: tile.index, url: `data:image/png;base64,${tile.image.toString('base64')}` })) } : {}) };
           targets = result.targets instanceof Map ? result.targets : new Map();
           if (rendered || deviceStatus.mode === 'simulator') lastRender = renderKey;
@@ -542,7 +580,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
         const scoped = agents.filter(a => !a.isSubagent && (basePlan.scope === 'history' ? a.presence !== 'live' : a.presence === 'live') && (displayOwner !== 'deck' || basePlan.view !== 'sessions' || a.projectId === basePlan.project?.id));
         const summary = { ...buildSummary(scoped, updatedAt, [...serviceWarnings, ...(feedbackError ? [feedback] : [])]), language };
         nativeSummary = nativeToken ? summary : null;
-        const showSummary = !activeGame && !activeScene;
+        const showSummary = !activeGame && !activeScene && !keyTest;
         if (showSummary && nativeToken) {
           try { nativeSideFrames = await nativeSummarySideFrames(summary); } catch { nativeSideFrames = []; }
         }
@@ -556,7 +594,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
           if (summaryRendered || device.status().mode === 'simulator') lastSummary = summaryKey;
         }
       } finally { rendering = false; }
-      snapshot = { device: device.status(), agents, usage, settings: settings.get(), ...(nativeToken ? { summary: nativeSummary } : {}), lastInput: lastInputOutcome, cleanup: publicReview(cleanupState), worktreeReview: publicReview(worktreeReview), parcelReview: publicParcelReview(parcelReview), parcelImportReview: publicParcelImportReview(parcelImportReview), remoteReview: publicRemoteReview(remoteReview), updateReview: publicUpdateReview(updateReview), warnings: serviceWarnings, updatedAt, refreshIntervalMs: interval,
+      snapshot = { device: device.status(), agents, usage, settings: settings.get(), ...(nativeToken ? { summary: nativeSummary } : {}), lastInput: lastInputOutcome, keyTest: publicKeyTest(), cleanup: publicReview(cleanupState), worktreeReview: publicReview(worktreeReview), parcelReview: publicParcelReview(parcelReview), parcelImportReview: publicParcelImportReview(parcelImportReview), remoteReview: publicRemoteReview(remoteReview), updateReview: publicUpdateReview(updateReview), warnings: serviceWarnings, updatedAt, refreshIntervalMs: interval,
         deck: committedDeck ? { ...committedDeck, message: feedback || committedDeck.message } : null };
     } catch (error) {
       const warnings = [`상태를 갱신하지 못했습니다: ${error.message}`];
@@ -614,7 +652,7 @@ async function refreshUsage() {
   return result;
 }
 
-async function press(index, revision, heldMs = 0) {
+async function press(index, revision, heldMs = 0, inputCode = null) {
   if (!Number.isInteger(index) || index < 0 || index >= layout.keyCount) return { ok: false, code: 'invalid', message: '버튼 번호가 올바르지 않습니다.' };
   if (actionBusy || reconnecting) return { ok: false, code: 'busy', message: '화면을 갱신 중입니다. 다시 눌러 주세요.' };
   // Preserve the mapping visible when the button was pressed. Wait for a
@@ -628,6 +666,22 @@ async function press(index, revision, heldMs = 0) {
   actionBusy = true;
   lastInteraction = Date.now();
   try {
+    if (committedOwner === 'router' && keyTest) {
+      // Every key is tested; only holding the exit key leaves.
+      if (index === keyTestExitIndex(PROFILES[layout.model]) && heldMs >= KEY_TEST_EXIT_HOLD_MS) {
+        keyTest = null;
+        keyTestImages.clear();
+        lastRender = '';
+        lastSummary = '';
+        feedback = '';
+        await refresh(true);
+        return { ok: true, code: 'navigated' };
+      }
+      const profile = PROFILES[layout.model];
+      keyTest = { count: keyTest.count + 1, last: { index, code: Number.isInteger(inputCode) ? inputCode : null, row: Math.floor(index / layout.cols), col: index % layout.cols, slot: profile.slotOf(index), heldMs, at: new Date().toISOString() } };
+      await refresh(true);
+      return { ok: true, code: 'updated' };
+    }
     // Scene input uses 293S legacy tile numbers; keys outside the area do nothing.
     const sceneIndex = layout.legacy.keys.indexOf(index);
     if (committedOwner === 'router' && router.current() === 'scenes' && sceneFrame && (revision === undefined || (sceneIndex >= 0 && sceneIndex < 12))) {
@@ -748,6 +802,8 @@ async function press(index, revision, heldMs = 0) {
           feedback = updateReview.message; feedbackError = !result.ok;
         }).catch(() => { updateReview = { stage: 'unavailable', reviewed: false, plan: null, message: '업데이트를 완료하지 못했습니다.' }; feedback = updateReview.message; feedbackError = true; })
           .finally(() => { updatePending = undefined; if (!closing) void refresh(); });
+      } else if (command === 'settings:keytest') {
+        keyTest = { last: null, count: 0 };
       } else if (command === 'settings:language') {
         await settings.update({ language: settings.get().language === 'en' ? 'ko' : 'en' });
       } else if (command === 'settings:sound') {
@@ -1258,7 +1314,7 @@ async function animate() {
   } finally { animationPending = false; }
 }
 async function maybeStartScreensaver() {
-  if (closing || reconnecting || actionBusy || rendering || pending || gameFrame || sceneFrame) return;
+  if (closing || reconnecting || actionBusy || rendering || pending || gameFrame || sceneFrame || keyTest) return;
   const option = settings.get().screensaver;
   if (!option.enabled || Date.now() - lastInteraction < option.idleMinutes * 60_000) return;
   if ((snapshot.agents || []).some(a => !a.isSubagent && a.presence === 'live' && a.status === 'blocked')) return;

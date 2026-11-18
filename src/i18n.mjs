@@ -35,7 +35,7 @@ const words = Object.freeze({
   '영구 삭제':'Delete','삭제 대상':'Targets','예상 용량':'Est. size','검토 확인':'Review',
   '최종 확인':'Final confirm','한 번 더 확인':'Confirm again','파일 삭제':'Delete files',
   '브랜치 유지':'Keep branch','대상 경로':'Target path','나머지 대상':'More targets',
-  '실행 제한':'Restricted','주소 있음':'Has address','주소 없음':'No address','일부 미확인':'Partly unknown','외장 드라이브':'External drive','선택':'Select','효과':'Effect','게임 메뉴':'Game menu','진행':'Next','소스 적용':'Apply source','돌아가기':'Back','번호 전송':'Send numbers','기본 한도':'Primary limit','추가 한도':'Extra limit'
+  '실행 제한':'Restricted','주소 있음':'Has address','주소 없음':'No address','일부 미확인':'Partly unknown','외장 드라이브':'External drive','선택':'Select','효과':'Effect','게임 메뉴':'Game menu','진행':'Next','소스 적용':'Apply source','돌아가기':'Back','번호 전송':'Send numbers','기본 한도':'Primary limit','추가 한도':'Extra limit','키 시험':'Key test','번호 확인':'Check keys'
 });
 
 // Keys which can contain names from accounts, quotes, paths, parcels, or hosts

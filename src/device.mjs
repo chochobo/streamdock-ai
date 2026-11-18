@@ -282,7 +282,8 @@ async function officialAppRunning() {
  * profile: the starting model. In hardware mode start() switches to the profile
  * of the single connected supported device; profile() returns the current one.
  * onKey(index): receives a zero-based row-major position on a key press.
- * onKeyEvent(index, phase, heldMs): down/up/cancel; durations are monotonic and bounded.
+ * onKeyEvent(index, phase, heldMs, code): down/up/cancel; durations are monotonic and bounded.
+ * code is the raw input code for down/up (undefined for cancel).
  * onControl({control, action, phase}): a rocker press (XL only): control left|right,
  *   action up|down|push, phase 'down'. A held rocker fires once until released.
  * renderImages({keys, sides}) writes supplied PNG/JPEG buffers only, converted to the model's size.
@@ -359,7 +360,7 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
       }, maxHoldMs);
       info.timer.unref?.();
       pressed.set(index, info);
-      invoke(onKeyEvent, index, 'down', 0);
+      invoke(onKeyEvent, index, 'down', 0, data[9]);
       invoke(onKey, index);
     } else {
       if (expired.delete(index)) return;
@@ -367,7 +368,7 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
       if (!info) return;
       clearTimeout(info.timer);
       pressed.delete(index);
-      invoke(onKeyEvent, index, 'up', elapsed(info.startedAt));
+      invoke(onKeyEvent, index, 'up', elapsed(info.startedAt), data[9]);
     }
   }
   const send = async packet => {
