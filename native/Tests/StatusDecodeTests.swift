@@ -90,6 +90,37 @@ private func check(_ condition: @autoclosure () -> Bool, _ message: String) thro
         let nullError = try decoder.decode(DashboardState.self, from: Data(#"{"device":{"connected":true},"settingsError":null}"#.utf8))
         try check(nullError.settingsError == nil, "null settings error")
 
+        // Diagnostics: reconnect state, timestamps, last input, and the copyable report.
+        try check(complete.connection == nil && complete.lastInput == nil && complete.device.lastTransportHeartbeatAt == nil, "older status has no diagnostics fields")
+        let diag = try decoder.decode(DashboardState.self, from: load("status-diagnostics.json"))
+        try check(diag.connection?.reconnecting == false && diag.connection?.consecutiveFailures == 3, "connection fields")
+        try check(diag.connection?.nextAttemptAt == "2026-11-19T10:00:15.000Z" && diag.connection?.lastError == "장치를 열지 못했습니다.", "connection time and error")
+        try check(diag.device.lastDeviceAcknowledgementAt == "2026-11-19T10:00:07.000Z" && diag.device.lastTransportHeartbeatAt == "2026-11-19T10:00:09.500Z", "device timestamps")
+        try check(diag.lastInput?.index == 7 && diag.lastInput?.code == "ok", "last key input")
+        let rocker = try decoder.decode(DashboardState.self, from: Data(#"{"device":{"connected":true},"lastInput":{"control":"rocker","action":"left","code":"ok"},"connection":{"reconnecting":"yes","consecutiveFailures":"2","nextAttemptAt":null}}"#.utf8))
+        try check(rocker.lastInput?.control == "rocker" && rocker.lastInput?.index == nil, "rocker input")
+        try check(rocker.connection != nil && rocker.connection?.reconnecting == nil && rocker.connection?.consecutiveFailures == nil, "malformed connection fields decode as nil")
+        let wrongShape = try decoder.decode(DashboardState.self, from: Data(#"{"device":{"connected":true},"connection":"down","lastInput":3}"#.utf8))
+        try check(wrongShape.device.connected && wrongShape.connection?.consecutiveFailures == nil && wrongShape.lastInput?.index == nil, "non-object diagnostics keep the status")
+
+        let now = ISO8601DateFormatter().date(from: "2026-11-19T10:00:10Z")!
+        try check(DiagnosticsReport.relative("2026-11-19T10:00:07.000Z", now: now) == "3초 전", "relative past")
+        try check(DiagnosticsReport.relative("2026-11-19T10:00:15.000Z", now: now) == "5초 후", "relative future")
+        try check(DiagnosticsReport.relative("2026-11-19T09:58:10Z", now: now) == "2분 전" && DiagnosticsReport.relative(nil, now: now) == nil, "relative minutes and missing")
+        try check(DiagnosticsReport.reconnectLabel(diag.connection, connected: false, now: now) == "재연결 중 · 다음 시도 5초 후 · 연속 실패 3회", "reconnect label")
+        try check(DiagnosticsReport.inputLabel(rocker.lastInput, now: now) == "로커 rocker left · ok", "rocker label")
+        let report = DiagnosticsReport.text(from: diag, now: now, appVersion: "0.1.0")
+        for expected in ["앱 버전: 0.1.0", "Stream Dock XL (5548:1028)", "Stream Dock XL (xl, 8x4)", "마지막 기기 응답: 3초 전", "마지막 하트비트:",
+                         "재연결 중 · 다음 시도 5초 후 · 연속 실패 3회", "마지막 재연결 오류: 장치를 열지 못했습니다.", "마지막 입력: 키 7 · ok · 5초 전",
+                         "알림: 3건 (settings, status, usage)", "설정 오류: settings_invalid_value · 항목 brightness", "기기 오류: open failed: <path>"] {
+            try check(report.contains(expected), "report contains \(expected)\n\(report)")
+        }
+        for forbidden in ["SECRET-SESSION-TITLE-ZETA", "secret-project-omega", "alice@example.com", "alice", "/Users/", "fixtureToken", "ABCDEFGHIJKLMNOPQRSTUVWXYZ", ".jsonl", "fixture-secret-agent"] {
+            try check(!report.contains(forbidden), "report must not contain \(forbidden)\n\(report)")
+        }
+        let emptyReport = DiagnosticsReport.text(from: nil, now: now)
+        try check(emptyReport.contains("앱 버전: 미확인") && emptyReport.contains("상태를 받지 못함"), "report without status")
+
         let invalid = Data(#"{"device":{"connected":true},"summary":{"warning":"false"}}"#.utf8)
         do {
             _ = try decoder.decode(DashboardState.self, from: invalid)

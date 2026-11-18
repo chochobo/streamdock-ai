@@ -7,6 +7,7 @@ trap 'rm -rf "$temp_dir"' EXIT HUP INT TERM
 xcrun swiftc -parse-as-library \
   "$repo_dir/native/App/BackendClient.swift" \
   "$repo_dir/native/App/BackendService.swift" \
+  "$repo_dir/native/App/DiagnosticsReport.swift" \
   "$repo_dir/native/App/ReviewPanel.swift" \
   "$repo_dir/native/App/ReviewValidation.swift" \
   "$test_dir/StatusDecodeTests.swift" \

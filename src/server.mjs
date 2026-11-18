@@ -97,6 +97,20 @@ let reconnecting = false;
 let reconnectPending;
 let reconnectDelayMs = 1000;
 let reconnectNextAttempt = 0;
+let reconnectFailures = 0;
+let reconnectLastError = null;
+// Diagnostics leave the machine via copy/paste: strip emails, paths and token-like runs.
+function diagnosticText(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  return value.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '<email>')
+    .replace(/(^|[\s'"`(=:])~?\/[^\s'"`)]+/g, '$1<path>')
+    .replace(/[A-Za-z0-9_\-]{24,}/g, '<redacted>').slice(0, 200);
+}
+function publicConnection() {
+  const disconnected = mode === 'hardware' && !device.status().connected;
+  return { reconnecting, nextAttemptAt: disconnected && reconnectNextAttempt > 0 ? new Date(reconnectNextAttempt).toISOString() : null,
+    consecutiveFailures: reconnectFailures, lastError: reconnectLastError };
+}
 let lastRender = '';
 let alertPlan = null;
 let blinkPending;
@@ -1174,10 +1188,10 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { ok: true, settings: next });
       } finally { actionBusy = false; }
     }
-    if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, nativePublicSnapshot(snapshot, req));
+    if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { ...nativePublicSnapshot(snapshot, req), connection: publicConnection() });
     if (req.method === 'POST' && url.pathname === '/api/refresh') {
       if (req.headers.origin !== `http://${host}`) return send(res, 403, { error: 'Invalid origin' });
-      return send(res, 200, nativePublicSnapshot(await refresh(), req));
+      return send(res, 200, { ...nativePublicSnapshot(await refresh(), req), connection: publicConnection() });
     }
     if (req.method === 'POST' && url.pathname === '/api/usage/refresh') {
       if (req.headers.origin !== `http://${host}`) return send(res, 403, { error: 'Invalid origin' });
@@ -1390,11 +1404,17 @@ function tryReconnect() {
       if (device.status().connected) {
         reconnectDelayMs = 1000;
         reconnectNextAttempt = 0;
+        reconnectFailures = 0;
+        reconnectLastError = null;
       }
     } else {
+      reconnectFailures += 1;
+      reconnectLastError = diagnosticText(device.status().error) || '장치를 열지 못했습니다.';
       snapshot = { ...snapshot, device: device.status() };
     }
-  })().catch(() => {
+  })().catch(error => {
+    reconnectFailures += 1;
+    reconnectLastError = diagnosticText(String(error?.message || error)) || '재연결에 실패했습니다.';
     snapshot = { ...snapshot, device: device.status() };
   }).finally(() => {
     reconnecting = false;

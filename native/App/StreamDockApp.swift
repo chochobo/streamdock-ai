@@ -583,7 +583,27 @@ private struct DiagnosticsView: View {
             Section("기기") {
                 LabeledContent("상태", value: client.state?.device.connected == true ? "연결됨" : "연결 안 됨")
                 LabeledContent("모델", value: client.state?.device.model ?? "미확인")
+                LabeledContent("배열", value: DiagnosticsReport.layoutLabel(client.state?.deck?.layout) ?? "미확인")
                 if let message = client.state?.device.error, !message.isEmpty { Text(message).foregroundStyle(.orange) }
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let state = client.state
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent("마지막 기기 응답", value: DiagnosticsReport.relative(state?.device.lastDeviceAcknowledgementAt, now: context.date) ?? "기록 없음")
+                        LabeledContent("마지막 하트비트", value: DiagnosticsReport.relative(state?.device.lastTransportHeartbeatAt, now: context.date) ?? "기록 없음")
+                        LabeledContent("재연결", value: DiagnosticsReport.reconnectLabel(state?.connection, connected: state?.device.connected == true, now: context.date) ?? "정보 없음")
+                        if let lastError = state?.connection?.lastError, !lastError.isEmpty {
+                            Text("마지막 재연결 오류: \(lastError)").font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+                        }
+                        LabeledContent("마지막 입력", value: DiagnosticsReport.inputLabel(state?.lastInput, now: context.date) ?? "없음")
+                    }
+                }
+                Button("진단 정보 복사") {
+                    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+                    let report = DiagnosticsReport.text(from: client.state, now: Date(), appVersion: version)
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(report, forType: .string)
+                }
+                Text("토큰·파일 경로·세션과 프로젝트 이름·계정 정보는 복사하지 않습니다.").font(.caption).foregroundStyle(.secondary)
             }
             Section("앱 엔진") {
                 Text(service.message).textSelection(.enabled)

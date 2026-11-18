@@ -13,6 +13,61 @@ struct DeviceState: Decodable {
     var model: String?
     var error: String?
     var mode: String?
+    var lastDeviceAcknowledgementAt: String?
+    var lastTransportHeartbeatAt: String?
+}
+
+/// Reconnect state from `/api/status`. Older backends omit it; malformed fields decode as nil.
+struct ConnectionState: Decodable {
+    var reconnecting: Bool?
+    var nextAttemptAt: String?
+    var consecutiveFailures: Int?
+    var lastError: String?
+
+    private enum CodingKeys: String, CodingKey { case reconnecting, nextAttemptAt, consecutiveFailures, lastError }
+
+    init(reconnecting: Bool? = nil, nextAttemptAt: String? = nil, consecutiveFailures: Int? = nil, lastError: String? = nil) {
+        self.reconnecting = reconnecting
+        self.nextAttemptAt = nextAttemptAt
+        self.consecutiveFailures = consecutiveFailures
+        self.lastError = lastError
+    }
+
+    init(from decoder: Decoder) throws {
+        guard let container = try? decoder.container(keyedBy: CodingKeys.self) else { return }
+        reconnecting = try? container.decodeIfPresent(Bool.self, forKey: .reconnecting)
+        nextAttemptAt = try? container.decodeIfPresent(String.self, forKey: .nextAttemptAt)
+        consecutiveFailures = try? container.decodeIfPresent(Int.self, forKey: .consecutiveFailures)
+        lastError = try? container.decodeIfPresent(String.self, forKey: .lastError)
+    }
+}
+
+/// The last physical input: a key (`index`) or a rocker (`control`/`action`), with its outcome code.
+struct LastInputState: Decodable {
+    var index: Int?
+    var control: String?
+    var action: String?
+    var code: String?
+    var at: String?
+
+    private enum CodingKeys: String, CodingKey { case index, control, action, code, at }
+
+    init(index: Int? = nil, control: String? = nil, action: String? = nil, code: String? = nil, at: String? = nil) {
+        self.index = index
+        self.control = control
+        self.action = action
+        self.code = code
+        self.at = at
+    }
+
+    init(from decoder: Decoder) throws {
+        guard let container = try? decoder.container(keyedBy: CodingKeys.self) else { return }
+        index = try? container.decodeIfPresent(Int.self, forKey: .index)
+        control = try? container.decodeIfPresent(String.self, forKey: .control)
+        action = try? container.decodeIfPresent(String.self, forKey: .action)
+        code = try? container.decodeIfPresent(String.self, forKey: .code)
+        at = try? container.decodeIfPresent(String.self, forKey: .at)
+    }
 }
 
 struct Meter: Decodable {
@@ -222,6 +277,8 @@ struct DashboardState: Decodable {
     var remoteReview: ReviewEnvelope?
     var updateReview: ReviewEnvelope?
     var settingsError: SettingsErrorInfo?
+    var connection: ConnectionState?
+    var lastInput: LastInputState?
     var warnings: [String]?
     var updatedAt: String?
 
