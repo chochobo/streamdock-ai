@@ -349,6 +349,12 @@ function handlePhysicalPress(index, heldMs) {
 // Scenes and games ignore rockers.
 const ROCKER_KEYS = { up: 'prev', down: 'next', push: 'back' };
 const ROCKER_BRIGHTNESS_STEP = { up: 10, down: -10 };
+// The rocker never turns the screen fully off (an unlabelled control could make
+// the device look dead). The settings range itself stays 0..100.
+const ROCKER_BRIGHTNESS_MIN = 10;
+// With no saved or sent brightness the device keeps its own level, which the app
+// cannot read. Step from the middle so neither direction jumps to an extreme.
+const ROCKER_BRIGHTNESS_UNKNOWN = 50;
 
 async function rockerAction(control, action) {
   if (reconnecting || legacyFrameActive()) return { ok: false, code: 'ignored' };
@@ -364,12 +370,21 @@ async function rockerAction(control, action) {
     lastInteraction = Date.now();
     try {
       const requested = device.status().requestedBrightness;
-      const current = Number.isInteger(requested) ? requested : settings.get().brightness ?? 100;
-      const value = Math.min(100, Math.max(0, current + ROCKER_BRIGHTNESS_STEP[action]));
-      if (value === current && settings.get().brightness === value) return { ok: true, code: 'unchanged' };
+      const saved = settings.get().brightness;
+      const current = Number.isInteger(requested) ? requested : Number.isInteger(saved) ? saved : ROCKER_BRIGHTNESS_UNKNOWN;
+      const step = ROCKER_BRIGHTNESS_STEP[action];
+      // Going down never passes the floor and never brightens a level already below it.
+      const value = step > 0 ? Math.min(100, current + step) : Math.max(Math.min(current, ROCKER_BRIGHTNESS_MIN), current + step);
+      if (value === current && saved === value) return { ok: true, code: 'unchanged' };
       const changed = await device.setBrightness(value);
       if (!changed && device.status().mode !== 'simulator') return { ok: false, code: 'unavailable' };
-      await settings.update({ brightness: value });
+      try {
+        await settings.update({ brightness: value });
+      } catch {
+        // Keep the device and the saved setting in agreement, as the app's settings endpoint does.
+        if (Number.isInteger(requested)) { try { await device.setBrightness(requested); } catch { /* Device error is reported by status. */ } }
+        return { ok: false, code: 'error' };
+      }
       await refresh(true);
       return { ok: true, code: 'updated' };
     } finally { actionBusy = false; }

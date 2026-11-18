@@ -109,18 +109,21 @@ export function createGameBridge(){return {async start(mode){log('start:'+mode);
   assert.equal(await rocker('left', 'push'), 'navigated');
   await until(() => status(base), s => s.deck?.view === 'projects');
 
-  // Right rocker steps brightness by 10, clamps to 0..100, and persists it.
+  // Right rocker steps brightness by 10 within 10..100 and persists it.
+  // Unknown brightness steps from the middle (50) so neither direction jumps to an extreme.
   assert.equal((await status(base)).settings.brightness, null);
-  assert.equal(await rocker('right', 'up'), 'updated', 'unknown brightness counts as 100');
+  assert.equal(await rocker('right', 'up'), 'updated');
+  assert.equal((await status(base)).settings.brightness, 60, 'unknown brightness steps from 50');
+  for (let step = 0; step < 4; step++) assert.equal(await rocker('right', 'up'), 'updated');
   assert.equal(await rocker('right', 'up'), 'unchanged');
   assert.equal(await rocker('right', 'down'), 'updated');
   assert.equal((await status(base)).settings.brightness, 90);
-  for (let step = 0; step < 9; step++) assert.equal(await rocker('right', 'down'), 'updated');
-  assert.equal(await rocker('right', 'down'), 'unchanged');
-  assert.deepEqual(await brightnessCalls(), [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0]);
+  for (let step = 0; step < 8; step++) assert.equal(await rocker('right', 'down'), 'updated');
+  assert.equal(await rocker('right', 'down'), 'unchanged', 'the rocker never turns the screen off');
+  assert.deepEqual(await brightnessCalls(), [60, 70, 80, 90, 100, 90, 80, 70, 60, 50, 40, 30, 20, 10]);
   const saved = JSON.parse(await readFile(path.join(home, '.config', 'streamdock-ai', 'settings.json'), 'utf8'));
-  assert.equal(saved.brightness, 0);
-  assert.equal((await status(base)).settings.brightness, 0);
+  assert.equal(saved.brightness, 10);
+  assert.equal((await status(base)).settings.brightness, 10);
   // Right push is reserved.
   assert.equal(await rocker('right', 'push'), 'empty');
 
@@ -136,7 +139,7 @@ export function createGameBridge(){return {async start(mode){log('start:'+mode);
   state = await status(base);
   assert.equal(state.deck.mode, 'scenes');
   assert.equal(await readFile(sceneLog, 'utf8'), '', 'no scene press or stop');
-  assert.equal((await brightnessCalls()).length, 11);
+  assert.equal((await brightnessCalls()).length, 14);
   key(20, 'down'); key(20, 'up', 1500);
   await until(() => status(base), s => s.deck?.view === 'hub');
 
@@ -150,5 +153,5 @@ export function createGameBridge(){return {async start(mode){log('start:'+mode);
   state = await status(base);
   assert.equal(state.deck.mode, 'games');
   assert.equal(await readFile(gameLog, 'utf8'), 'start:mole\n', 'no game press or menu');
-  assert.equal((await brightnessCalls()).length, 11);
+  assert.equal((await brightnessCalls()).length, 14);
 });
