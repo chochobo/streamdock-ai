@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { translateKeys } from '../src/i18n.mjs';
+import { featureItems } from '../src/feature-pages.mjs';
 
 test('translates app-owned control and feature text and preserves dynamic values', () => {
   const keys = [
@@ -42,4 +43,37 @@ test('uses safe fallback and keeps Korean unchanged', () => {
   assert.equal(translateKeys(keys,'ko'),keys);
   assert.equal(translateKeys(keys,'fr'),keys);
   assert.equal(translateKeys(null,'en'),null);
+});
+
+test('translates usage window durations and limit words', () => {
+  const t = label => translateKeys([{kind:'quota',windowLabel:label}],'en')[0].windowLabel;
+  assert.equal(t('7일'),'7d');
+  assert.equal(t('5시간'),'5h');
+  assert.equal(t('30분'),'30 min');
+  assert.equal(t('기본 한도'),'Primary limit');
+  assert.equal(t('추가 한도'),'Extra limit');
+  const got = translateKeys([{kind:'feature',id:'update-review',label:'업데이트',caption:'3개 파일'},{kind:'feature',id:'parcel-review',label:'Cainiao',caption:'2건'},{kind:'control',label:'게임 메뉴'}],'en');
+  assert.deepEqual(got.map(k=>k.caption),['3 files','2 items',undefined]);
+  assert.equal(got[2].label,'Game menu');
+  assert.equal(translateKeys([{kind:'feature',id:'summary-working',label:'7일',caption:'5시간'}],'en')[0].label,'7d');
+  // user-provided labels with the same shape on non-system ids stay untouched
+  assert.equal(translateKeys([{kind:'feature',id:'parcel-0',label:'7일'}],'en')[0].label,'7일');
+});
+
+test('english feature pages leave no Hangul in system-owned labels', () => {
+  const hangul = /[가-힣]/;
+  const data = {
+    machine:{cpuPercent:10,memoryUsedPercent:30,disk:{usedPercent:45},networkHasAddress:true,battery:{percent:50}},
+    pomodoro:{state:'running',remainingSeconds:61},
+    settings:{language:'en',sound:{enabled:true},screensaver:{enabled:true,idleMinutes:5,scene:'fire'},brightness:50,capabilities:{brightness:true},update:{configured:true,status:'up_to_date',canCheck:true}},
+  };
+  const modes = ['summary','machines','pomodoro','market','parcels','worktrees','games','scenes','credits','remote','settings','unknown-mode'];
+  for (const mode of modes) {
+    const keys = translateKeys(featureItems(mode,data).map(item => ({kind:'feature',...item})),'en');
+    for (const key of keys) for (const field of ['label','caption']) {
+      assert.ok(!hangul.test(key[field] || ''), `${mode}/${key.id}.${field}: ${key[field]}`);
+    }
+  }
+  const windows = ['7일','5시간','90분','기본 한도','추가 한도'].map(windowLabel => ({kind:'quota',windowLabel}));
+  for (const key of translateKeys(windows,'en')) assert.ok(!hangul.test(key.windowLabel), key.windowLabel);
 });
