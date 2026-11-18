@@ -76,6 +76,8 @@ test('a stable requirement chains to Apple or pins the exact leaf certificate', 
   assert.notEqual(stable(leaf(local), ''), 0);
   assert.notEqual(stable(`designated => identifier "other.app" and certificate leaf = H"${local.toLowerCase()}"`, local), 0);
   assert.notEqual(stable('designated => identifier "local.streamdock.ai" and cdhash H"1234"', local), 0);
+  assert.notEqual(stable(`designated => identifier "local.streamdock.ai" and certificate leaf = H"${local.toLowerCase()}00"`, local), 0);
+  assert.notEqual(stable(`designated => identifier "local.streamdock.ai" and certificate root = H"${local.toLowerCase()}"`, local), 0);
 });
 
 test('an existing app pinned to a local identity keeps that identity', () => {
