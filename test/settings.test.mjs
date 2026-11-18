@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createSettings } from '../src/settings.mjs';
+import { createSettings, SettingsError } from '../src/settings.mjs';
 
 async function fixture(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'streamdock-settings-test-'));
@@ -81,8 +81,8 @@ test('does not overwrite malformed, oversized, or symbolic-link settings', async
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, '{broken');
   const settings = createSettings({ file });
-  await assert.rejects(settings.load(), /Invalid settings JSON/);
-  await assert.rejects(settings.update({ brightness: 20 }), /Invalid settings JSON/);
+  await assert.rejects(settings.load(), { code: 'settings_invalid_json' });
+  await assert.rejects(settings.update({ brightness: 20 }), { code: 'settings_invalid_json' });
   assert.equal(await fs.readFile(file, 'utf8'), '{broken');
   await fs.writeFile(file, 'x'.repeat(17_000));
   await assert.rejects(settings.load(), /Unsafe settings file/);

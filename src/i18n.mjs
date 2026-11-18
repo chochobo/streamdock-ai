@@ -35,16 +35,18 @@ const words = Object.freeze({
   '영구 삭제':'Delete','삭제 대상':'Targets','예상 용량':'Est. size','검토 확인':'Review',
   '최종 확인':'Final confirm','한 번 더 확인':'Confirm again','파일 삭제':'Delete files',
   '브랜치 유지':'Keep branch','대상 경로':'Target path','나머지 대상':'More targets',
-  '실행 제한':'Restricted'
+  '실행 제한':'Restricted','주소 있음':'Has address','주소 없음':'No address','일부 미확인':'Partly unknown','외장 드라이브':'External drive','선택':'Select','효과':'Effect','게임 메뉴':'Game menu','진행':'Next','소스 적용':'Apply source','돌아가기':'Back','번호 전송':'Send numbers','기본 한도':'Primary limit','추가 한도':'Extra limit'
 });
 
 // Keys which can contain names from accounts, quotes, paths, parcels, or hosts
 // are never included in this allowlist, even if the name matches a UI word.
-const systemLabelId = /^(?:machine-(?:unavailable|cpu|memory|disk|network|battery|temp|health)|timer-(?:unavailable|current|start-\d+|pause|resume|reset)|settings-[\w-]+|game-[\w-]+|scene-[\w-]+|market-(?:view|refresh|heat|source|unavailable|empty|consent-(?:info|cancel|frequency|confirm|invalid))|parcels-[\w-]+|parcel-(?:review|wait|confirm|cancel)|update-(?:review|wait|apply|cancel)|worktrees-empty|worktree-(?:review-scope|confirm|web-review|cancel|reason-\d+)|cleanup-(?:clean|purge|trash|review-scope|review-count|review-size|confirm|web-review|cancel|more|reason-\d+)|summary-(?:working|blocked|done|unknown|recommendation)|credits-unavailable|remote-(?:unconfigured|no-operations|cancel|web-review|confirm)|feature-unavailable)$/;
+const systemLabelId = /^(?:machine-(?:unavailable|drive-status|cpu|memory|disk|network|battery|temp|health)|timer-(?:unavailable|current|start-\d+|pause|resume|reset)|settings-[\w-]+|game-[\w-]+|scene-[\w-]+|market-(?:view|refresh|heat|source|unavailable|empty|consent-(?:info|cancel|frequency|confirm|invalid))|parcels-[\w-]+|parcel-(?:review|wait|confirm|cancel)|update-(?:review|wait|apply|cancel)|worktrees-empty|worktree-(?:review-scope|confirm|web-review|cancel|reason-\d+)|cleanup-(?:clean|purge|trash|review-scope|review-count|review-size|confirm|web-review|cancel|more|reason-\d+)|summary-(?:working|blocked|done|unknown|recommendation)|credits-unavailable|remote-(?:unconfigured|no-operations|cancel|web-review|confirm)|feature-unavailable)$/;
 const generatedCaptionId = /^(?:machine-|timer-|settings-|game-|scene-|market-(?!quote-)|parcels-|parcel-(?:\d+$|review|wait|confirm|cancel)|update-(?:review|wait|apply|cancel)|worktree-|worktrees-|cleanup-|summary-(?!recommendation$)|credit-|credits-|remote-|feature-)/;
 const dynamic = text => {
   let m;
   if ((m = /^(\d+)분$/.exec(text))) return `${m[1]} min`;
+  if ((m = /^(\d+)일$/.exec(text))) return `${m[1]}d`;
+  if ((m = /^(\d+)시간$/.exec(text))) return `${m[1]}h`;
   if ((m = /^대기 (\d+)분$/.exec(text))) return `Idle ${m[1]}m`;
   if ((m = /^밝기 (\d+)$/.exec(text))) return `Light ${m[1]}%`;
   if ((m = /^(\d+)% 저장$/.exec(text))) return `${m[1]}% saved`;
@@ -56,6 +58,8 @@ const dynamic = text => {
   if ((m = /^작업 (\d+)(\?)?$/.exec(text))) return `Working ${m[1]}${m[2] || ''}`;
   if ((m = /^부하 ([\d.]+)$/.exec(text))) return `Load ${m[1]}`;
   if ((m = /^(\d+)초$/.exec(text))) return `${m[1]} sec`;
+  if ((m = /^(\d+)개 파일$/.exec(text))) return `${m[1]} files`;
+  if ((m = /^(\d+)건$/.exec(text))) return `${m[1]} items`;
   if ((m = /^(\d+)개$/.exec(text))) return `${m[1]} items`;
   if ((m = /^대상 (\d+)$/.exec(text))) return `Target ${m[1]}`;
   return text;
