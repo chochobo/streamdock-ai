@@ -262,8 +262,7 @@ export function keyTileSvg(key = {}) {
   return `<svg width="96" height="96" xmlns="http://www.w3.org/2000/svg">${background}<rect x="0" y="0" width="96" height="4" fill="${color}"/>${labels}<text x="8" y="${oldBar ? 68 : bar ? 70 : 80}" fill="${color}" font-family="sans-serif" font-size="${captionSize}" font-weight="bold">${escape(caption)}</text>${icon}${providerBadge}${oldLabel}${bar}</svg>`;
 }
 
-async function tile(sharp, key, profile) {
-  const svg = keyTileSvg(key);
+async function tile(sharp, svg, profile) {
   // Tiles are drawn upright at 96 px, then scaled and rotated for the model.
   // Pillow's 90-degree rotation in the vendor SDK is counter-clockwise.
   let image = sharp(Buffer.from(svg));
@@ -478,11 +477,11 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
         for (let index = 0; index < current.keyCount; index++) {
           if (summaryKeys.has(index)) continue;
           const key = byIndex.get(index) || {};
-          const signature = JSON.stringify([key.id || '', key.action || '', key.index, key.label || '', key.state || '', Boolean(key.estimated), key.kind || '', key.caption || '', key.provider || '', Boolean(key.disabled), key.windowLabel || '', key.usedPercent ?? null, key.resetDate || '', key.resetTime || '', key.usageStatus || '', key.language || 'ko', Boolean(key.alertPulse), key.bar?.value ?? null, key.bar?.direction || '', Boolean(key.bar?.stale), key.bar?.warningAt ?? null, key.bar?.criticalAt ?? null,
-            Number.isSafeInteger(key.memory?.usedBytes) && key.memory.usedBytes >= 0 ? (key.memory.usedBytes / (1024 ** 3)).toFixed(1) : null,
-            key.memory?.estimated === true && Number.isSafeInteger(key.memory?.totalBytes) && key.memory.totalBytes > 0 && Number.isSafeInteger(key.memory?.usedBytes) && key.memory.usedBytes >= 0 && key.memory.usedBytes <= key.memory.totalBytes && Math.round(key.memory.usedBytes * 100 / key.memory.totalBytes) === key.bar?.value]);
+          // The cache key is what is drawn: the SVG plus everything that maps it to pixels.
+          const svg = keyTileSvg(key);
+          const signature = createHash('sha256').update(`${current.id}|${current.imageSize}|${current.rotate}|${svg}`).digest('hex');
           if (sent.get(index) === signature) continue;
-          const image = await tile(sharp, key, current);
+          const image = await tile(sharp, svg, current);
           for (const packet of imagePackets(current.slotOf(index), image)) await send(packet);
           sent.set(index, signature);
         }
