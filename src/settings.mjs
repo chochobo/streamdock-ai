@@ -14,23 +14,40 @@ const DEFAULTS = Object.freeze({
 });
 const copy = value => structuredClone(value);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const allowed = (value, keys) => isRecord(value) && Object.keys(value).every(key => keys.includes(key));
+/** Validation failure. `message` is a short Korean sentence with no paths or values; `code`, `field` and `allowed` are machine-readable. */
+export class SettingsError extends TypeError {
+  constructor(code, field, allowed, message) {
+    super(message);
+    this.name = 'SettingsError';
+    this.code = code;
+    this.field = field;
+    this.allowed = allowed;
+  }
+}
+const invalid = (field, allowed, message) => new SettingsError('settings_invalid_value', field, allowed, message);
+const prefix = parent => (parent ? `${parent}.` : '');
+function checkRecord(value, keys, parent = '') {
+  if (!isRecord(value)) throw invalid(parent || 'settings', 'object', `${parent || '설정'} 항목은 객체여야 합니다.`);
+  const unknown = Object.keys(value).find(key => !keys.includes(key));
+  if (unknown !== undefined) throw new SettingsError('settings_unknown_field', `${prefix(parent)}${unknown}`, keys, `알 수 없는 설정 항목입니다. 사용할 수 있는 항목: ${keys.join(', ')}`);
+}
 
 function validate(value, partial = false) {
-  if (!allowed(value, ['version', 'language', 'sound', 'brightness', 'screensaver'])) throw new TypeError('Invalid settings fields');
-  if ((!partial || Object.hasOwn(value, 'version')) && value.version !== 1) throw new TypeError('Unsupported settings version');
-  if (Object.hasOwn(value, 'language') && !['ko', 'en'].includes(value.language)) throw new TypeError('Invalid language');
+  checkRecord(value, ['version', 'language', 'sound', 'brightness', 'screensaver']);
+  if ((!partial || Object.hasOwn(value, 'version')) && value.version !== 1) throw invalid('version', [1], 'version 값은 1이어야 합니다.');
+  if (Object.hasOwn(value, 'language') && !['ko', 'en'].includes(value.language)) throw invalid('language', ['ko', 'en'], "language 값은 'ko' 또는 'en'이어야 합니다.");
   if (!partial || Object.hasOwn(value, 'sound')) {
-    if (!allowed(value.sound, ['enabled']) || ((!partial || Object.hasOwn(value.sound, 'enabled')) && typeof value.sound.enabled !== 'boolean')) throw new TypeError('Invalid sound settings');
+    checkRecord(value.sound, ['enabled'], 'sound');
+    if ((!partial || Object.hasOwn(value.sound, 'enabled')) && typeof value.sound.enabled !== 'boolean') throw invalid('sound.enabled', [true, false], 'sound.enabled 값은 true 또는 false여야 합니다.');
   }
   if (!partial || Object.hasOwn(value, 'brightness')) {
-    if (value.brightness !== null && (!Number.isInteger(value.brightness) || value.brightness < 0 || value.brightness > 100)) throw new RangeError('Brightness must be null or an integer from 0 to 100');
+    if (value.brightness !== null && (!Number.isInteger(value.brightness) || value.brightness < 0 || value.brightness > 100)) throw invalid('brightness', { type: 'integer', min: 0, max: 100, nullable: true }, 'brightness 값은 null 또는 0에서 100 사이의 정수여야 합니다.');
   }
   if (!partial || Object.hasOwn(value, 'screensaver')) {
-    if (!allowed(value.screensaver, ['enabled', 'idleMinutes', 'scene'])) throw new TypeError('Invalid screensaver settings');
-    if ((!partial || Object.hasOwn(value.screensaver, 'enabled')) && typeof value.screensaver.enabled !== 'boolean') throw new TypeError('Invalid screensaver enabled value');
-    if ((!partial || Object.hasOwn(value.screensaver, 'idleMinutes')) && (!Number.isInteger(value.screensaver.idleMinutes) || value.screensaver.idleMinutes < 1 || value.screensaver.idleMinutes > 1440)) throw new RangeError('Screensaver idleMinutes must be from 1 to 1440');
-    if ((!partial || Object.hasOwn(value.screensaver, 'scene')) && !SCENES.has(value.screensaver.scene)) throw new TypeError('Unknown screensaver scene');
+    checkRecord(value.screensaver, ['enabled', 'idleMinutes', 'scene'], 'screensaver');
+    if ((!partial || Object.hasOwn(value.screensaver, 'enabled')) && typeof value.screensaver.enabled !== 'boolean') throw invalid('screensaver.enabled', [true, false], 'screensaver.enabled 값은 true 또는 false여야 합니다.');
+    if ((!partial || Object.hasOwn(value.screensaver, 'idleMinutes')) && (!Number.isInteger(value.screensaver.idleMinutes) || value.screensaver.idleMinutes < 1 || value.screensaver.idleMinutes > 1440)) throw invalid('screensaver.idleMinutes', { type: 'integer', min: 1, max: 1440 }, 'screensaver.idleMinutes 값은 1에서 1440 사이의 정수여야 합니다.');
+    if ((!partial || Object.hasOwn(value.screensaver, 'scene')) && !SCENES.has(value.screensaver.scene)) throw invalid('screensaver.scene', [...SCENES], `screensaver.scene 값은 ${[...SCENES].join(', ')} 중 하나여야 합니다.`);
   }
 }
 
@@ -42,7 +59,7 @@ async function readConfig(filename) {
     if (!stat.isFile() || stat.size > 16_384 || (typeof process.getuid === 'function' && stat.uid !== process.getuid())) throw new Error('Unsafe settings file');
     const bytes = await handle.readFile();
     let parsed;
-    try { parsed = JSON.parse(bytes.toString('utf8')); } catch { throw new Error('Invalid settings JSON; the file was not changed'); }
+    try { parsed = JSON.parse(bytes.toString('utf8')); } catch { throw new SettingsError('settings_invalid_json', null, null, '설정 파일이 올바른 JSON이 아닙니다. 파일은 변경되지 않았습니다.'); }
     validate(parsed);
     return { value: { language: 'ko', ...parsed }, bytes };
   } catch (error) {
@@ -53,7 +70,7 @@ async function readConfig(filename) {
 
 export function validateSettingsPatch(patch) {
   validate(patch, true);
-  if (Object.hasOwn(patch, 'version')) throw new TypeError('Version cannot be changed through settings');
+  if (Object.hasOwn(patch, 'version')) throw new SettingsError('settings_readonly_field', 'version', null, 'version 항목은 설정 변경으로 바꿀 수 없습니다.');
   return true;
 }
 
