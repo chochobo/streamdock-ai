@@ -1,0 +1,54 @@
+name: Issue criteria
+
+# PR 이 닫는 이슈(Closes #N)에 체크 안 된 완료 조건이 남아 있으면 실패한다.
+# ruleset protect-<기본브랜치> 의 필수 체크라 실패하면 merge 할 수 없다 — 잡 이름
+# `issue-criteria` 가 곧 필수 체크 이름이므로 바꾸지 않는다.
+#
+# 이슈 본문을 고쳐 체크하면 PR 이벤트가 아니라 이슈 이벤트가 나므로, 그때는
+# 연결된 열린 PR 의 마지막 검사를 다시 돌린다(rerun-linked-prs).
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+  issues:
+    types: [edited]
+
+jobs:
+  issue-criteria:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: 연결 이슈의 완료 조건 확인
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/check_issue_criteria.py --pr "${{ github.event.pull_request.number }}"
+
+  rerun-linked-prs:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: read
+    steps:
+      - name: 이 이슈를 언급한 열린 PR 의 검사 재실행
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+        # 검색은 느슨하게(본문에 #N 언급) 잡는다 — 재실행은 결과를 다시 계산할 뿐이라
+        # 무관한 PR 을 다시 돌려도 해가 없다. 진행 중인 실행은 rerun 이 거부하므로 무시한다.
+        run: |
+          for branch in $(gh pr list --state open --search "#${ISSUE} in:body" --json headRefName -q '.[].headRefName'); do
+            run_id=$(gh run list --workflow issue-criteria.yml --branch "$branch" --event pull_request --limit 1 --json databaseId -q '.[0].databaseId')
+            if [ -n "$run_id" ]; then
+              echo "재실행: $branch (run $run_id)"
+              gh run rerun "$run_id" || echo "건너뜀: $branch — 실행 중이거나 재실행 불가"
+            fi
+          done
