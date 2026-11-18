@@ -58,8 +58,12 @@ Claude Desktop의 사용량 배지를 읽는 대체 경로에는 macOS **손쉬�
 ## 개발과 테스트
 
 ```sh
-npm test
+npm test            # Node 테스트
+npm run test:native # Swift 테스트 (macOS)
+npm run check       # 둘 다 — PR 전에 돌리는 로컬 게이트
 ```
+
+이슈·브랜치·PR 흐름은 [작업 흐름](docs/workflow.md)을 따릅니다.
 
 자동 드라이버 테스트는 모의 HID 장치를 사용합니다. 독립 백엔드를 개발할 때는 `npm start`로 실행할 수 있습니다. 기본값은 모의 장치 모드이며, 실행 중인 네이티브 앱과 같은 포트를 사용할 수 없습니다. 종료하려면 `Ctrl+C`를 누르세요.
 

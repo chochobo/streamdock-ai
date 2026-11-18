@@ -7,7 +7,9 @@
   "description": "Local AI agent status dashboard for Mirabox StreamDock",
   "scripts": {
     "start": "node src/server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "test:native": "swift test --package-path native/HID && for s in native/Tests/run-*.sh; do sh \"$s\" || exit 1; done",
+    "check": "npm test && npm run test:native"
   },
   "engines": {
     "node": ">=22"

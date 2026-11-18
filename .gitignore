@@ -9,6 +9,7 @@ build/
 
 # Local tooling and operating system files
 .serena/
+**/.omc/
 .openchrome/
 .DS_Store
 *.log
