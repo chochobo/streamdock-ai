@@ -6,6 +6,7 @@ const execFileAsync = promisify(execFile);
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createPresenceProvider } from './presence.mjs';
+import { warning } from './warnings.mjs';
 
 const STATES = new Set(['working', 'blocked', 'done', 'idle', 'error', 'unknown']);
 const TAIL_BYTES = 512 * 1024;
@@ -221,7 +222,7 @@ async function listDirectory(dir) {
 async function readHooks(dir, source, now, maxAgeMs, warnings) {
   let entries;
   try { entries = await listDirectory(dir); }
-  catch { warnings.push(`Cannot read ${source} agent status directory`); return []; }
+  catch { warnings.push(warning('agent_history_unreadable', `Cannot read ${source} agent status directory`)); return []; }
   const records = await Promise.all(entries.filter(e => e.isFile() && e.name.endsWith('.json')).slice(0, 500).map(async entry => {
     try {
       const stat = await fs.stat(path.join(dir, entry.name));
@@ -334,7 +335,7 @@ async function readCodex(home, now, maxAgeMs, warnings) {
     const dir = path.join(root, String(date.getFullYear()), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0'));
     let entries;
     try { entries = await listDirectory(dir); }
-    catch { warnings.push('Cannot read Codex session directory'); continue; }
+    catch { warnings.push(warning('codex_history_unreadable', 'Cannot read Codex session directory')); continue; }
     const files = await Promise.all(entries.filter(e => e.isFile() && e.name.endsWith('.jsonl')).map(async entry => {
       const file = path.join(dir, entry.name);
       try { return { file, stat: await fs.stat(file) }; } catch { return null; }
@@ -368,10 +369,10 @@ export async function readAgents({ home = os.homedir(), now = Date.now(), maxAge
     presenceRead,
   ]);
   if (detector) {
-    if (!processPresence) warnings.push('세션 실행 여부를 확인할 수 없습니다.');
+    if (!processPresence) warnings.push(warning('sessions_unknown', '세션 실행 여부를 확인할 수 없습니다.'));
     else {
-      if (!processPresence.codex?.available) warnings.push('Codex 열린 세션을 일부 확인할 수 없습니다.');
-      if (!processPresence.claude?.available) warnings.push('Claude 세션 실행 여부를 일부 확인할 수 없습니다.');
+      if (!processPresence.codex?.available) warnings.push(warning('codex_sessions_partial', 'Codex 열린 세션을 일부 확인할 수 없습니다.'));
+      if (!processPresence.claude?.available) warnings.push(warning('claude_sessions_partial', 'Claude 세션 실행 여부를 일부 확인할 수 없습니다.'));
     }
   }
   // Prefer the newest observation for an identical provider/session ID.

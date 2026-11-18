@@ -28,6 +28,7 @@ import { createCleanupService } from './cleanup.mjs';
 import { createSettings, SettingsError, validateSettingsPatch } from './settings.mjs';
 import { createNativeProviderSettings } from './native-provider-settings.mjs';
 import { translateKeys, translateUsage } from './i18n.mjs';
+import { warning, publicWarnings } from './warnings.mjs';
 import { createAlertTracker } from './alerts.mjs';
 import { createUpdater, readUpdateConfig } from './update.mjs';
 import { createModeRouter } from './modes.mjs';
@@ -91,7 +92,7 @@ const device = deviceFactory({ mode, profile: initialProfile, onKeyEvent: (index
     handlePhysicalPress(index, heldMs);
   }
 }, onControl: event => handleRocker(event) });
-let snapshot = { device: { connected: false, model: '', error: '시작 중' }, agents: [], warnings: [], updatedAt: null, refreshIntervalMs: interval };
+let snapshot = { device: { connected: false, model: '', error: '시작 중' }, agents: [], warnings: [], warningCodes: [], updatedAt: null, refreshIntervalMs: interval };
 let pending;
 let reconnecting = false;
 let reconnectPending;
@@ -162,7 +163,7 @@ let updatePending;
 let updateReview = null;
 let updateConfigLastAttempt = 0;
 try { await settings.load(); sound.setEnabled(settings.get().sound.enabled); }
-catch (error) { settingsWarning = '설정을 읽지 못했습니다.'; settingsError = publicSettingsError(error); }
+catch (error) { settingsWarning = warning('settings_unreadable', '설정을 읽지 못했습니다.'); settingsError = publicSettingsError(error); }
 let lastInteraction = Date.now();
 let autoScene = false;
 const remoteProvider = createRemoteProvider();
@@ -193,7 +194,7 @@ const claudeDesktopUsage = createClaudeDesktopUsageProvider();
 let usageSnapshot = { accounts: [
   { id: 'codex-local-account', provider: 'codex', label: 'Codex 연결 계정', status: 'unavailable', updatedAt: null, windows: [] },
   { id: 'claude-unavailable', provider: 'claude', label: 'Claude 계정 미확인', status: 'unavailable', updatedAt: null, windows: [] },
-], warnings: [], updatedAt: null };
+], warnings: [], warningCodes: [], updatedAt: null };
 let usagePending;
 let usageLastAttempt = 0;
 
@@ -273,7 +274,7 @@ function requestFeatureData(active, force = false) {
   if (active === 'credits' && !creditsPending && (force || now - creditsLastAttempt >= 60_000)) {
     creditsLastAttempt = now;
     creditsPending = (process.env.STREAMDOCK_FEATURE_NETWORK_DISABLED === '1' ? Promise.resolve({ services: [], warnings: [] }) : readCredits()).then(value => { creditsSnapshot = value; })
-      .catch(() => { creditsSnapshot = { services: [], warnings: ['크레딧 정보를 읽지 못했습니다.'] }; })
+      .catch(() => { creditsSnapshot = { services: [], warnings: [warning('credits_unreadable', '크레딧 정보를 읽지 못했습니다.')] }; })
       .finally(() => { creditsPending = undefined; if (!closing) void refresh(); });
   }
   if (active === 'worktrees' && !worktreesPending && (force || now - worktreesLastAttempt >= 60_000)) {
@@ -622,7 +623,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
           if (rendered || deviceStatus.mode === 'simulator') lastRender = renderKey;
         }
         const scoped = agents.filter(a => !a.isSubagent && (basePlan.scope === 'history' ? a.presence !== 'live' : a.presence === 'live') && (displayOwner !== 'deck' || basePlan.view !== 'sessions' || a.projectId === basePlan.project?.id));
-        const summary = { ...buildSummary(scoped, updatedAt, [...serviceWarnings, ...(feedbackError ? [feedback] : [])]), language };
+        const summary = { ...buildSummary(scoped, updatedAt, [...serviceWarnings, ...(feedbackError ? [warning('action_failed', feedback)] : [])]), language };
         nativeSummary = nativeToken ? summary : null;
         const showSummary = !activeGame && !activeScene && !keyTest;
         if (showSummary && nativeToken) {
@@ -638,13 +639,13 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
           if (summaryRendered || device.status().mode === 'simulator') lastSummary = summaryKey;
         }
       } finally { rendering = false; }
-      snapshot = { device: device.status(), agents, usage, settings: settings.get(), ...(nativeToken ? { summary: nativeSummary } : {}), lastInput: lastInputOutcome, keyTest: publicKeyTest(), cleanup: publicReview(cleanupState), worktreeReview: publicReview(worktreeReview), parcelReview: publicParcelReview(parcelReview), parcelImportReview: publicParcelImportReview(parcelImportReview), remoteReview: publicRemoteReview(remoteReview), updateReview: publicUpdateReview(updateReview), settingsError, warnings: serviceWarnings, updatedAt, refreshIntervalMs: interval,
+      snapshot = { device: device.status(), agents, usage, settings: settings.get(), ...(nativeToken ? { summary: nativeSummary } : {}), lastInput: lastInputOutcome, keyTest: publicKeyTest(), cleanup: publicReview(cleanupState), worktreeReview: publicReview(worktreeReview), parcelReview: publicParcelReview(parcelReview), parcelImportReview: publicParcelImportReview(parcelImportReview), remoteReview: publicRemoteReview(remoteReview), updateReview: publicUpdateReview(updateReview), settingsError, ...publicWarnings(serviceWarnings), updatedAt, refreshIntervalMs: interval,
         deck: committedDeck ? { ...committedDeck, message: feedback || committedDeck.message } : null };
     } catch (error) {
-      const warnings = [`상태를 갱신하지 못했습니다: ${error.message}`];
+      const warnings = [warning('refresh_failed', `상태를 갱신하지 못했습니다: ${error.message}`)];
       try { await device.renderSummary(buildSummary(snapshot.agents, snapshot.updatedAt, warnings)); } catch { /* Preserve the original error. */ }
       lastSummary = '';
-      snapshot = { ...snapshot, device: device.status(), warnings };
+      snapshot = { ...snapshot, device: device.status(), ...publicWarnings(warnings) };
     }
     return snapshot;
   })().finally(() => { pending = undefined; });
@@ -670,7 +671,7 @@ async function refreshUsage() {
       } else {
         const provider = index === 0 ? 'codex' : 'claude';
         accounts.push({ id: `${provider}-unavailable`, provider, label: provider === 'codex' ? 'Codex 연결 계정' : 'Claude 계정 미확인', status: 'unavailable', updatedAt: null, windows: [] });
-        warnings.push(`${provider === 'codex' ? 'Codex' : 'Claude'} 사용량을 확인할 수 없습니다.`);
+        warnings.push(warning(`${provider}_usage_unavailable`, `${provider === 'codex' ? 'Codex' : 'Claude'} 사용량을 확인할 수 없습니다.`));
       }
     }
     if (desktopSource.status === 'fulfilled' && Array.isArray(desktopSource.value?.accounts)) {
@@ -685,9 +686,9 @@ async function refreshUsage() {
         issues.push({ provider: 'claude-desktop', code: 'permission_required' });
       }
     } else {
-      warnings.push('Claude Desktop 사용량을 읽지 못했습니다.');
+      warnings.push(warning('claude_desktop_usage_unreadable', 'Claude Desktop 사용량을 읽지 못했습니다.'));
     }
-    const usage = { accounts, warnings, issues, updatedAt: new Date().toISOString() };
+    const usage = { accounts, ...publicWarnings(warnings), issues, updatedAt: new Date().toISOString() };
     usageSnapshot = { ...usage, pace: buildUsagePace(usage) };
     return usageSnapshot;
   })().finally(() => { usagePending = undefined; });

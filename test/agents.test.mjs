@@ -279,3 +279,21 @@ test('Claude Desktop ignores other accounts and fails closed for multiple organi
   result=await readAgents({home});
   assert.ok(![...result.targets.values()].some(target=>target.origin==='claude-desktop'));
 });
+
+test('unreadable hook and Codex directories report coded warnings', async t => {
+  const home = await tempHome(t);
+  const now = Date.now();
+  // A file where a directory is expected makes readdir fail with ENOTDIR.
+  for (const dir of [path.join(home, '.cache', 'streamdock-ai'), path.join(home, '.cache', 'd200')]) {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'agents'), '');
+  }
+  await fs.mkdir(path.join(home, '.codex'), { recursive: true });
+  await fs.writeFile(path.join(home, '.codex', 'sessions'), '');
+  const { warnings } = await readAgents({ home, now });
+  const codes = warnings.map(w => w.code);
+  assert.deepEqual(codes.filter(code => code === 'agent_history_unreadable').length, 2);
+  assert.ok(codes.includes('codex_history_unreadable'));
+  assert.ok(codes.every(code => ['agent_history_unreadable', 'codex_history_unreadable'].includes(code)));
+  assert.ok(warnings.every(w => typeof w.message === 'string' && w.message.startsWith('Cannot read')));
+});

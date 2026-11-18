@@ -35,7 +35,7 @@ test('invalid, future, unconfigured source, and symlink snapshots fail closed', 
   const target = await write(home, 'outside.json', { checked: new Date(NOW).toISOString(), credits: 5 });
   await symlink(target, path.join(dir, 'flow.json'));
   let r = await readCredits({ home, now: NOW });
-  assert.deepEqual(r.services.map(s => s.status), ['unavailable', 'unavailable']); assert.equal(r.warnings.length, 1);
+  assert.deepEqual(r.services.map(s => s.status), ['unavailable', 'unavailable']); assert.deepEqual(r.warnings.map(w => w.code), ['credits_browser_setup_required']);
   await rm(path.join(dir, 'flow.json')); await write(home, '.cache/streamdock-ai/credits/flow.json', { checked: new Date(NOW + 120000).toISOString(), credits: 2 });
   r = await readCredits({ home, now: NOW }); assert.equal(r.services[0].status, 'unavailable');
 });
@@ -49,4 +49,13 @@ test('only recognized plan names are retained, including normal multiword names'
   assert.equal(safe.services[0].tier, 'Pro Plan'); assert.equal(safe.services[1].tier, 'Pro Monthly');
   await write(home, '.cache/streamdock-ai/credits/flow.json', { checkedAt: new Date(NOW).toISOString(), balance: 10, tier: 'SECRET TOKEN' });
   assert.equal((await readCredits({ home, now: NOW })).services[0].tier, '');
+});
+
+test('unsupported collection source reports a coded warning', async t => {
+  const home = await fixture(t);
+  await write(home, '.config/streamdock-ai/credits.json', { sources: { flow: { enabled: true, source: 'scrape' } } });
+  const r = await readCredits({ home, now: NOW });
+  assert.equal(r.services[0].status, 'unavailable');
+  assert.deepEqual(r.warnings.map(w => w.code), ['credits_source_unsupported']);
+  assert.match(r.warnings[0].message, /지원하지 않는 수집 방식/);
 });

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { parseClaudeDesktopBadge } from './claude-desktop-badge.mjs';
+import { warning } from './warnings.mjs';
 
 const run = promisify(execFile);
 const script = fileURLToPath(new URL('./claude-desktop-usage.swift', import.meta.url));
@@ -49,13 +50,13 @@ export function createClaudeDesktopUsageProvider({ query = queryClaudeDesktopUsa
           const observed = last && Date.parse(last.updatedAt);
           const issues = failure === 'permission_required' ? [{ provider: 'claude-desktop', code: 'permission_required' }] : [];
           if (Number.isFinite(observed) && now >= observed && now - observed <= maxStaleMs) {
-            return { accounts: [{ ...last, status: 'stale' }], warnings: ['Claude Desktop 화면을 읽지 못해 이전 관측값을 표시합니다.'], issues };
+            return { accounts: [{ ...last, status: 'stale' }], warnings: [warning('claude_desktop_usage_stale', 'Claude Desktop 화면을 읽지 못해 이전 관측값을 표시합니다.')], issues };
           }
           // The status-line provider supplies a separate unavailable card.
-          const warning = failure === 'permission_required' ? 'Claude Desktop 접근성 권한이 없어 사용량을 읽지 못했습니다.'
-            : failure === 'ambiguous' ? 'Claude Desktop에 서로 다른 사용량 표시가 있어 값을 선택하지 않았습니다.'
-            : ['not_found', 'incomplete'].includes(failure) ? 'Claude Desktop에서 주간 사용량 표시를 찾지 못했습니다.' : null;
-          return { accounts: [], warnings: warning ? [warning] : [], issues };
+          const notice = failure === 'permission_required' ? warning('claude_desktop_permission_required', 'Claude Desktop 접근성 권한이 없어 사용량을 읽지 못했습니다.')
+            : failure === 'ambiguous' ? warning('claude_desktop_usage_ambiguous', 'Claude Desktop에 서로 다른 사용량 표시가 있어 값을 선택하지 않았습니다.')
+            : ['not_found', 'incomplete'].includes(failure) ? warning('claude_desktop_usage_not_found', 'Claude Desktop에서 주간 사용량 표시를 찾지 못했습니다.') : null;
+          return { accounts: [], warnings: notice ? [notice] : [], issues };
         }
       })().finally(() => { inFlight = undefined; });
       return inFlight;

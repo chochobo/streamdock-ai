@@ -3,6 +3,7 @@ import path from 'node:path';
 import { constants } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { readBrowserCredit } from './credits-browser.mjs';
+import { warning } from './warnings.mjs';
 
 const browserCache = new Map();
 
@@ -50,12 +51,12 @@ export async function readCredits({ home = os.homedir(), configPath = path.join(
     const base = { id, label, status: 'not-configured', source: null, balance: null, total: null, resetAt: null, resetLabel: null, resetQuality: null, tier: '', checkedAt: null };
     if (!setting || setting.enabled !== true) return base;
     if (!['agentdeck-cache', 'snapshot', 'cdp'].includes(setting.source)) {
-      warnings.push(`${label}: 지원하지 않는 수집 방식입니다.`);
+      warnings.push(warning('credits_source_unsupported', `${label}: 지원하지 않는 수집 방식입니다.`));
       return { ...base, status: 'unavailable' };
     }
     if (setting.source === 'cdp') {
       if (setting.dedicatedProfile !== true || !Number.isInteger(setting.port) || setting.port < 1024 || setting.port > 65535) {
-        warnings.push(`${label}: 전용 브라우저 설정이 필요합니다.`);
+        warnings.push(warning('credits_browser_setup_required', `${label}: 전용 브라우저 설정이 필요합니다.`));
         return { ...base, source: 'cdp', status: 'unavailable' };
       }
       // A CDP browser must be explicitly opted in and proven dedicated on every

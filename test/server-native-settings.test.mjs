@@ -125,7 +125,7 @@ test('usage reports a sanitized Claude Desktop accessibility issue', { timeout: 
   const loader = path.join(home, 'loader.mjs');
   await writeFile(codex, `export function createCodexUsageProvider(){return {read:async()=>({accounts:[],warnings:[]})}}`);
   await writeFile(claude, `export async function readClaudeUsage(){return {accounts:[],warnings:[]}}`);
-  await writeFile(desktop, `export function createClaudeDesktopUsageProvider(){return {read:async()=>({accounts:[],warnings:['permission'],issues:[{provider:'claude-desktop',code:'permission_required',private:'must-not-leak'}]})}}`);
+  await writeFile(desktop, `export function createClaudeDesktopUsageProvider(){return {read:async()=>({accounts:[],warnings:['permission',{code:'claude_desktop_permission_required',message:'coded permission'}],issues:[{provider:'claude-desktop',code:'permission_required',private:'must-not-leak'}]})}}`);
   const replacements = Object.fromEntries([['./usage-codex.mjs',codex],['./usage-claude.mjs',claude],['./usage-claude-desktop.mjs',desktop]].map(([key,value])=>[key,pathToFileURL(value).href]));
   await writeFile(loader, `const replacements=${JSON.stringify(replacements)};export async function resolve(s,c,n){if(c.parentURL?.endsWith('/src/server.mjs')&&replacements[s])return {url:replacements[s],shortCircuit:true};return n(s,c)}`);
   const port=await freePort(), base=`http://127.0.0.1:${port}`;
@@ -137,6 +137,9 @@ test('usage reports a sanitized Claude Desktop accessibility issue', { timeout: 
   while(Date.now()<deadline){if(child.exitCode!==null||child.signalCode!==null)throw Error('isolated server stopped');try{const response=await fetch(`${base}/api/status`);if(response.ok){status=await response.json();if(status.usage?.issues?.length)break}}catch{}await delay(50)}
   assert.deepEqual(status?.usage?.issues,[{provider:'claude-desktop',code:'permission_required'}]);
   assert.ok(!JSON.stringify(status).includes('must-not-leak'));
+  // Public JSON keeps string warnings; codes travel in a parallel array.
+  assert.deepEqual(status.usage.warnings,['permission','coded permission']);
+  assert.deepEqual(status.usage.warningCodes,['unknown','claude_desktop_permission_required']);
 });
 
 test('status exposes a sanitized settings error when the settings file is invalid', { timeout: 15000 }, async t => {
@@ -165,6 +168,8 @@ test('status exposes a sanitized settings error when the settings file is invali
   assert.deepEqual(status?.settingsError, { code: 'settings_invalid_value', field: 'brightness',
     allowed: { type: 'integer', min: 0, max: 100, nullable: true }, message: 'brightness 값은 null 또는 0에서 100 사이의 정수여야 합니다.' });
   assert.ok(status.warnings.includes('설정을 읽지 못했습니다.'));
+  assert.equal(status.warningCodes.length, status.warnings.length);
+  assert.equal(status.warningCodes[status.warnings.indexOf('설정을 읽지 못했습니다.')], 'settings_unreadable');
   assert.ok(!JSON.stringify(status.settingsError).includes(home));
   assert.ok(!JSON.stringify(status.settingsError).includes('250'));
 });
