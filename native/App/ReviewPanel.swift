@@ -270,7 +270,7 @@ private struct ReviewCard: View {
                             Toggle("전체 대상과 내용을 확인했습니다", isOn: $confirmed)
                                 .disabled(!readToEnd || !sameReview || waiting)
                             if kind.requiresPhysicalConfirmation {
-                                Text("확인 후 293S에서 해당 키를 길게 눌러 실행합니다.").font(.caption).foregroundStyle(.secondary)
+                                Text("확인 후 \(client.state?.deviceName ?? "기기")에서 해당 키를 길게 눌러 실행합니다.").font(.caption).foregroundStyle(.secondary)
                                 Button(review.reviewed == true ? "확인됨" : "검토 확인") { Task { await submit() } }
                                     .disabled(!canSubmit || review.reviewed == true)
                             } else {

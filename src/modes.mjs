@@ -1,12 +1,17 @@
+import { PROFILES, layoutFor } from './device-profiles.mjs';
+
 /**
- * Pure navigation for optional 293S feature pages.
+ * Pure navigation for optional feature pages. Key positions come from a
+ * device layout (see device-profiles.mjs); the default is the 293S V3 layout.
  * Project, history and usage pages remain owned by deck.mjs. A caller can
  * open this hub with the project home's dedicated feature key, then route
  * the returned actions to feature-specific controllers.
  */
 
+const DEFAULT_LAYOUT = layoutFor(PROFILES['293sv3']);
 export const LONG_PRESS_MS = 800;
-export const PAGE_CAPACITY = 12;
+/** Feature items per page on the default (293S V3) layout. */
+export const PAGE_CAPACITY = DEFAULT_LAYOUT.pageContent.length;
 export const MODE_CATALOG = Object.freeze([
   { id: 'summary', label: '요약', detail: '한도와 작업' },
   { id: 'projects', label: '에이전트', detail: '프로젝트와 세션' },
@@ -44,8 +49,8 @@ function reconcile(order, desired) {
 }
 
 /** The feature key exists on the live project home, not on history pages. */
-export function isModeHubShortcut({ view, scope, index } = {}) {
-  return view === 'projects' && scope === 'live' && index === 11;
+export function isModeHubShortcut({ view, scope, index, layout = DEFAULT_LAYOUT } = {}) {
+  return view === 'projects' && scope === 'live' && index === layout.controls.modes;
 }
 
 // Only pass explicitly measured percentages and validated meanings to renderers.
@@ -69,6 +74,15 @@ function safeMemory(memory, bar) {
       memory.usedBytes < 0 || memory.totalBytes <= 0 || memory.usedBytes > memory.totalBytes ||
       Math.round(100 * memory.usedBytes / memory.totalBytes) !== Math.round(bar.value)) return null;
   return { usedBytes: memory.usedBytes, totalBytes: memory.totalBytes, estimated: true };
+}
+
+// keyTileSvg infers the arrow of a disabled prev/next key only at the 293S
+// positions 13/14. Elsewhere name the action; disabled keys stay unbound.
+function nameDisabledArrows(keys, controls) {
+  for (const action of ['prev', 'next']) {
+    const index = controls[action];
+    if (keys[index].disabled && index !== DEFAULT_LAYOUT.controls[action]) keys[index] = { ...keys[index], action };
+  }
 }
 
 export function createModeRouter() {
@@ -101,7 +115,8 @@ export function createModeRouter() {
     return { type: 'navigate', mode };
   }
 
-  function planPage({ items = [], title, availability = {} } = {}) {
+  function planPage({ items = [], title, availability = {}, layout = DEFAULT_LAYOUT } = {}) {
+    const { keyCount, controls, pageContent } = layout;
     if (!Array.isArray(items)) throw new TypeError('Items must be an array');
     const isHub = mode === 'hub';
     if (!isHub && (mode === 'projects' || mode === 'usage')) throw new Error('Project and usage views are owned by deck.mjs');
@@ -118,13 +133,15 @@ export function createModeRouter() {
     if (!orders.has(mode)) orders.set(mode, []);
     const order = orders.get(mode);
     reconcile(order, [...byId.keys()]);
-    const pages = Math.max(1, Math.ceil(order.length / PAGE_CAPACITY));
+    const capacity = pageContent.length;
+    const pages = Math.max(1, Math.ceil(order.length / capacity));
     page = Math.min(page, pages - 1);
-    const keys = Array.from({ length: 15 }, (_, index) => empty(index));
-    const bindings = Array(15).fill(null);
-    order.slice(page * PAGE_CAPACITY, (page + 1) * PAGE_CAPACITY).forEach((id, index) => {
+    const keys = Array.from({ length: keyCount }, (_, index) => empty(index));
+    const bindings = Array(keyCount).fill(null);
+    order.slice(page * capacity, (page + 1) * capacity).forEach((id, slot) => {
       const item = byId.get(id);
       if (!item) return;
+      const index = pageContent[slot];
       const enabled = item.enabled !== false;
       const action = isHub ? 'open_mode' : 'feature_action';
       const bar = safeBar(item.bar);
@@ -139,10 +156,11 @@ export function createModeRouter() {
       };
       if (enabled) bindings[index] = isHub ? { action, mode: id } : { action, id, command: safeText(item.action || id, 80) };
     });
-    keys[12] = control(12, 'back', '뒤로');
-    keys[13] = control(13, 'prev', '이전', page > 0);
-    keys[14] = control(14, 'next', '다음', page + 1 < pages);
-    for (const index of [12, 13, 14]) if (!keys[index].disabled) bindings[index] = { action: keys[index].action };
+    keys[controls.back] = control(controls.back, 'back', '뒤로');
+    keys[controls.prev] = control(controls.prev, 'prev', '이전', page > 0);
+    keys[controls.next] = control(controls.next, 'next', '다음', page + 1 < pages);
+    for (const index of [controls.back, controls.prev, controls.next]) if (!keys[index].disabled) bindings[index] = { action: keys[index].action };
+    nameDisabledArrows(keys, controls);
     const signature = JSON.stringify({ mode, page, generation, bindings });
     return {
       view: isHub ? 'hub' : 'feature', mode, title: safeText(title || (isHub ? '기능' : MODE_CATALOG.find(item => item.id === mode)?.label || mode)),
@@ -152,7 +170,7 @@ export function createModeRouter() {
   }
 
   function commit(plan) {
-    if (!plan || plan.mode !== mode || plan._generation !== generation || !Array.isArray(plan.bindings) || plan.bindings.length !== 15 || typeof plan._signature !== 'string') throw new TypeError('Stale or invalid mode plan');
+    if (!plan || plan.mode !== mode || plan._generation !== generation || !Array.isArray(plan.bindings) || !Array.isArray(plan.keys) || plan.bindings.length !== plan.keys.length || !Object.values(PROFILES).some(profile => profile.keyCount === plan.bindings.length) || typeof plan._signature !== 'string') throw new TypeError('Stale or invalid mode plan');
     committed = plan;
     committedSignature = plan._signature;
     revision = plan.revision;
@@ -162,7 +180,7 @@ export function createModeRouter() {
   }
 
   function press(index, { revision: expectedRevision, heldMs = 0 } = {}) {
-    if (!committed || !Number.isInteger(index) || index < 0 || index >= 15) return { type: 'none' };
+    if (!committed || !Number.isInteger(index) || index < 0 || index >= committed.bindings.length) return { type: 'none' };
     if (expectedRevision !== undefined && expectedRevision !== revision) return { type: 'stale', revision };
     if (navigationPending || committed.mode !== mode) return { type: 'busy' };
     const binding = committed.bindings[index];

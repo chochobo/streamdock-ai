@@ -45,6 +45,24 @@ private func check(_ condition: @autoclosure () -> Bool, _ message: String) thro
         try check(partial.parcelReview?.stage == "loading" && partial.parcelReview?.reviewId == nil, "loading review")
         try check(partial.remoteReview?.message == "확인할 수 없습니다.", "review message")
 
+        let xl = try decoder.decode(DashboardState.self, from: load("status-xl.json"))
+        let xlLayout = xl.deck?.deckLayout
+        try check(xl.device.model == "Stream Dock XL (5548:1028)" && xl.deviceName == "Stream Dock XL", "XL device name")
+        try check(xlLayout?.model == "xl" && xlLayout?.cols == 8 && xlLayout?.rows == 4 && xlLayout?.keyCount == 32, "XL grid")
+        try check(xlLayout?.sideSlots.isEmpty == true && xlLayout?.summaryKeys == [7, 15, 23], "XL summary keys")
+        try check(xlLayout?.controls?.modes == 28 && xlLayout?.controls?.next == 31, "XL controls")
+        try check(xl.deck?.keys.count == 32 && xl.deck?.sideFrames?.isEmpty == true, "XL keys and no side frames")
+        try check(xl.deck?.keyFrames?.map(\.index) == [7, 15, 23] && xl.deck?.keyFrames?.allSatisfy({ $0.image != nil }) == true, "XL summary frames")
+
+        let legacyDeck = try decoder.decode(DashboardState.self, from: load("status-no-layout.json"))
+        try check(legacyDeck.deck?.layout == nil && legacyDeck.deck?.deckLayout == .s293, "missing layout falls back to 293S")
+        try check(legacyDeck.deck?.deckLayout.cols == 5 && legacyDeck.deck?.deckLayout.rows == 3 && legacyDeck.deck?.deckLayout.sideSlots == [16, 17, 18], "293S fallback geometry")
+        try check(legacyDeck.deviceName == "Stream Dock 293S V3" && legacyDeck.deck?.keys.count == 15, "293S fallback name and keys")
+        try check(complete.deck?.deckLayout == .s293 && partial.deck?.deckLayout == .s293, "existing fixtures decode as 293S")
+        let badLayout = Data(#"{"device":{"connected":true},"deck":{"revision":1,"keys":[],"layout":{"model":"x","name":"X","cols":0,"rows":0,"keyCount":0,"sideSlots":[],"summaryKeys":[]}}}"#.utf8)
+        let badState = try decoder.decode(DashboardState.self, from: badLayout)
+        try check(badState.deck?.deckLayout == .s293, "unusable layout falls back to 293S")
+
         let structuredPermission = Data(#"{"device":{"connected":false},"usage":{"issues":[{"provider":"claude-desktop","code":"permission_required"}]}}"#.utf8)
         let structuredState = try decoder.decode(DashboardState.self, from: structuredPermission)
         try check(structuredState.claudeAccessibilityRequired, "structured accessibility warning")

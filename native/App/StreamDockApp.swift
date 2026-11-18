@@ -41,7 +41,7 @@ private struct MenuBarContent: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Text(client.state?.device.connected == true ? "293S 연결됨" : "293S 연결 확인 중")
+        Text(client.state?.device.connected == true ? "\(client.state?.deviceName ?? "기기") 연결됨" : "기기 연결 확인 중")
         Divider()
         Button("대시보드 열기") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
         Button("상태 갱신") { Task { await client.refreshStatus() } }
@@ -92,7 +92,7 @@ private struct MainView: View {
             .safeAreaInset(edge: .bottom) {
                 HStack(spacing: 7) {
                     Circle().fill(client.state?.device.connected == true ? Color.green : Color.secondary).frame(width: 8, height: 8)
-                    Text(client.state?.device.connected == true ? "293S 연결됨" : "기기 연결 확인 중")
+                    Text(client.state?.device.connected == true ? "\(client.state?.deviceName ?? "기기") 연결됨" : "기기 연결 확인 중")
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                 }.padding(12)
@@ -128,6 +128,7 @@ private struct DeviceView: View {
     var openReviews: () -> Void
     // Ratios come from the physical 293S: the right strip is narrower than
     // a key, and the spaces between keys are proportional to the key size.
+    // Devices without side screens (XL) reuse the key and row gap ratios.
     private let keySpacingRatio: CGFloat = 0.18
     private let rowSpacingRatio: CGFloat = 0.16
     private let sideSpacingRatio: CGFloat = 0.22
@@ -140,7 +141,7 @@ private struct DeviceView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("StreamDock 293S").font(.largeTitle.bold())
+                        Text(client.state?.deviceName ?? "StreamDock").font(.largeTitle.bold())
                         Text("키를 누르면 기기와 같은 동작을 실행합니다.").foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -156,7 +157,7 @@ private struct DeviceView: View {
                 }
                 if let deck = client.state?.deck {
                     if deck.mode == "scenes", deck.frames?.isEmpty == false {
-                        Label("나가려면 293S 맨 아래 줄 맨 오른쪽 키를 1.2초 이상 누른 뒤 놓으세요.", systemImage: "hand.tap")
+                        Label(sceneExitHint(deck.deckLayout), systemImage: "hand.tap")
                             .font(.callout)
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -174,23 +175,29 @@ private struct DeviceView: View {
                         Spacer()
                         Text("\(deck.page ?? 1) / \(deck.pages ?? 1)").monospacedDigit().foregroundStyle(.secondary)
                     }
+                    let layout = deck.deckLayout
+                    let cols = CGFloat(layout.cols)
+                    let rows = CGFloat(layout.rows)
+                    let hasSide = !layout.sideSlots.isEmpty
+                    let widthUnits = cols + (cols - 1) * keySpacingRatio + (hasSide ? sideSpacingRatio + sideWidthRatio : 0)
+                    let heightUnits = rows + (rows - 1) * rowSpacingRatio
                     GeometryReader { geometry in
-                        let widthUnits = 5 + 4 * keySpacingRatio + sideSpacingRatio + sideWidthRatio
                         let keySize = max(0, geometry.size.width / widthUnits)
                         let keySpacing = keySize * keySpacingRatio
                         let rowSpacing = keySize * rowSpacingRatio
-                        let gridWidth = 5 * keySize + 4 * keySpacing
-                        let gridHeight = 3 * keySize + 2 * rowSpacing
+                        let gridWidth = cols * keySize + (cols - 1) * keySpacing
+                        let gridHeight = rows * keySize + (rows - 1) * rowSpacing
                         // Scene/game artwork uses the original three-slot geometry.
                         // The normal summary clock sits lower on the physical 293S.
                         let animated = (deck.mode == "scenes" || deck.mode == "games") && deck.frames?.isEmpty == false
                         let clockOffset = animated ? 0 : keySize * 0.20
-                        let columns = Array(repeating: GridItem(.fixed(keySize), spacing: keySpacing), count: 5)
+                        let columns = Array(repeating: GridItem(.fixed(keySize), spacing: keySpacing), count: layout.cols)
                         HStack(alignment: .top, spacing: keySize * sideSpacingRatio) {
                             LazyVGrid(columns: columns, spacing: rowSpacing) {
                                 ForEach(deck.keys, id: \.index) { key in
                                     Button { Task { await client.press(key) } } label: {
-                                        KeyPreview(key: key, frame: deck.frames?.first(where: { $0.index == key.index }) ?? deck.keyFrames?.first(where: { $0.index == key.index }))
+                                        KeyPreview(key: key, frame: deck.frames?.first(where: { $0.index == key.index }) ?? deck.keyFrames?.first(where: { $0.index == key.index }),
+                                               isSummary: layout.summaryKeys.contains(key.index))
                                             .frame(width: keySize, height: keySize)
                                     }
                                     .buttonStyle(.plain)
@@ -199,15 +206,17 @@ private struct DeviceView: View {
                                 }
                             }
                             .frame(width: gridWidth, height: gridHeight, alignment: .topLeading)
-                            SidePreview(frames: deck.sideFrames, summary: client.state?.summary,
-                                        rowHeight: keySize * sideHeightRatio,
-                                        rowSpacing: rowSpacing * sideHeightRatio,
-                                        clockOffset: clockOffset)
-                                .frame(width: keySize * sideWidthRatio, height: gridHeight * sideHeightRatio + clockOffset * 0.5)
-                                .offset(y: keySize * sideTopInsetRatio)
+                            if hasSide {
+                                SidePreview(slots: layout.sideSlots, frames: deck.sideFrames, summary: client.state?.summary,
+                                            rowHeight: keySize * sideHeightRatio,
+                                            rowSpacing: rowSpacing * sideHeightRatio,
+                                            clockOffset: clockOffset)
+                                    .frame(width: keySize * sideWidthRatio, height: gridHeight * sideHeightRatio + clockOffset * 0.5)
+                                    .offset(y: keySize * sideTopInsetRatio)
+                            }
                         }
                     }
-                    .aspectRatio((5 + 4 * keySpacingRatio + sideSpacingRatio + sideWidthRatio) / (3 + 2 * rowSpacingRatio), contentMode: .fit)
+                    .aspectRatio(widthUnits / heightUnits, contentMode: .fit)
                     .frame(maxWidth: 840, alignment: .leading)
                     Text("실제 기기와 화면 내용이 바뀌면 미리보기도 갱신됩니다.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -223,6 +232,14 @@ private struct DeviceView: View {
                 }
             }.padding(24)
         }
+    }
+
+    /// Scenes use the top-left 5x3 area; the exit key is its bottom-right key.
+    private func sceneExitHint(_ layout: DeckLayout) -> String {
+        if layout.cols == 5 && layout.rows == 3 {
+            return "나가려면 \(layout.name) 맨 아래 줄 맨 오른쪽 키를 1.2초 이상 누른 뒤 놓으세요."
+        }
+        return "나가려면 \(layout.name) 위에서 3번째 줄, 왼쪽에서 5번째 키를 1.2초 이상 누른 뒤 놓으세요."
     }
 
     private func deckTitle(_ deck: DeckState) -> String {
@@ -244,6 +261,7 @@ private struct DeviceView: View {
 private struct KeyPreview: View {
     var key: DeckKey
     var frame: PreviewFrame?
+    var isSummary = false
 
     private var color: Color {
         switch key.state {
@@ -268,6 +286,10 @@ private struct KeyPreview: View {
                 RoundedRectangle(cornerRadius: 8).fill(Color(red: 0.05, green: 0.08, blue: 0.11))
                 if let image = frame?.image {
                     Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 8))
+                } else if isSummary {
+                    Text("요약").font(.system(size: min(13, geo.size.width * 0.14), weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.35))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(key.label ?? "").font(.system(size: min(17, geo.size.width * 0.16), weight: .bold)).lineLimit(2)
@@ -303,6 +325,7 @@ private struct KeyPreview: View {
 }
 
 private struct SidePreview: View {
+    var slots: [Int]
     var frames: [PreviewFrame]?
     var summary: DeckSummary?
     var rowHeight: CGFloat
@@ -314,8 +337,8 @@ private struct SidePreview: View {
             // Keep each source square undistorted. The summary's final frame
             // sits lower on the 293S, so reserve space below it for every pixel.
             VStack(spacing: rowSpacing) {
-                ForEach(16...18, id: \.self) { slot in
-                    let offset = slot == 18 ? clockOffset : 0
+                ForEach(slots, id: \.self) { slot in
+                    let offset = slot == slots.last ? clockOffset : 0
                     ZStack(alignment: .top) {
                         Color(red: 0.05, green: 0.08, blue: 0.11)
                         Group {
@@ -446,7 +469,7 @@ private struct PreferencesView: View {
                 Text("로그인 실행 설정은 macOS에 즉시 적용됩니다.").font(.caption).foregroundStyle(.secondary)
                 if let loginMessage { Text(loginMessage).font(.caption).foregroundStyle(.secondary) }
             }
-            Section("293S") {
+            Section(client.state?.deviceName ?? "기기") {
                 HStack {
                     Text("밝기")
                     Slider(value: $brightness, in: 0...100, step: 1) { Text("밝기") } onEditingChanged: { changed in if !changed { brightnessChanged = true } }

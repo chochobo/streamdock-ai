@@ -2,13 +2,14 @@ import { spawn as defaultSpawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { createDevice } from './device.mjs';
+import { profileForUsb } from './device-profiles.mjs';
 
-const IDS = [13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3];
+const DEVICE_PATH = 'swift-hid';
 
 /** node-hid compatible HID transport for the Swift helper; does not open a device until devicesAsync(). */
 export function createSwiftHID({ executable, args = [], spawn = defaultSpawn, timeoutMs = 5000, allowSimulation = false } = {}) {
   if (typeof executable !== 'string' || !path.isAbsolute(executable) || !Array.isArray(args) || !Number.isInteger(timeoutMs) || timeoutMs < 10 || timeoutMs > 60000) throw new TypeError('Invalid Swift HID helper configuration');
-  let child, childClosed, active, readyPromise, readyResolve, readyReject, readyTimer, buffer = '', nextId = 1, closing = false, failed = false;
+  let child, childClosed, active, usb, readyPromise, readyResolve, readyReject, readyTimer, buffer = '', nextId = 1, closing = false, failed = false;
   const pending = new Map();
   function rejectPending(error) {
     for (const { reject, timer } of pending.values()) { clearTimeout(timer); reject(error); }
@@ -27,13 +28,16 @@ export function createSwiftHID({ executable, args = [], spawn = defaultSpawn, ti
     if (!value || typeof value !== 'object') return fail(new Error('Invalid Swift HID response'));
     if (value.event === 'ready') {
       if (typeof value.simulated !== 'boolean' || (value.simulated && !allowSimulation)) return fail(new Error('Swift HID simulator cannot represent a hardware connection'));
+      if (!Number.isInteger(value.vendorId) || !Number.isInteger(value.productId) || !profileForUsb(value.vendorId, value.productId)) return fail(new Error('Swift HID reported an unsupported device'));
+      usb = { vendorId: value.vendorId, productId: value.productId };
       clearTimeout(readyTimer); readyResolve?.(); return;
     }
     if (value.event === 'device-ack') { active?.emit('deviceAck'); return; }
     if (value.event === 'error') return fail(new Error(typeof value.message === 'string' ? value.message.slice(0, 256) : 'Swift HID error'));
     if (value.event === 'key') {
-      if (!Number.isInteger(value.index) || value.index < 0 || value.index >= IDS.length || typeof value.pressed !== 'boolean') return fail(new Error('Invalid Swift HID key event'));
-      const event = Buffer.from([0x41, 0x43, 0x4b, 0, 0, 0x4f, 0x4b, 0, 0, IDS[value.index], value.pressed ? 1 : 0]);
+      if (!Number.isInteger(value.code) || value.code < 0x01 || value.code > 0x26 || typeof value.pressed !== 'boolean') return fail(new Error('Invalid Swift HID key event'));
+      // Rebuild the raw input report; device.mjs maps the code to a key position.
+      const event = Buffer.from([0x41, 0x43, 0x4b, 0, 0, 0x4f, 0x4b, 0, 0, value.code, value.pressed ? 1 : 0]);
       active?.emit('data', event);
       return;
     }
@@ -71,7 +75,7 @@ export function createSwiftHID({ executable, args = [], spawn = defaultSpawn, ti
   class HID extends EventEmitter {
     constructor(devicePath) {
       super();
-      if (devicePath !== 'swift-293sv3' || active || !child || failed || closing) throw new Error('Swift HID is unavailable');
+      if (devicePath !== DEVICE_PATH || active || !child || failed || closing) throw new Error('Swift HID is unavailable');
       active = this;
     }
     writePacket(packet) {
@@ -97,7 +101,7 @@ export function createSwiftHID({ executable, args = [], spawn = defaultSpawn, ti
     }
   }
   return {
-    async devicesAsync() { await launch(); if (failed || closing) throw new Error('Swift HID unavailable'); return [{ vendorId: 0x6603, productId: 0x1014, usagePage: 0xff00, usage: 1, path: 'swift-293sv3' }]; },
+    async devicesAsync() { await launch(); if (failed || closing) throw new Error('Swift HID unavailable'); return [{ ...usb, usagePage: 0xff00, usage: 1, path: DEVICE_PATH }]; },
     async waitClosed() {
       if (!childClosed) return;
       let timer;
