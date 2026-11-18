@@ -355,6 +355,9 @@ function syncLayout() {
   gameInputs.length = 0;
   lastRender = '';
   lastSummary = '';
+  // Positions recorded for the previous model mean nothing on the new one.
+  if (keyTest) keyTest = { last: null, count: 0 };
+  keyTestImages.clear();
 }
 
 // A reconnect can switch the device model while a refresh is awaiting I/O.
@@ -423,14 +426,26 @@ async function rockerAction(control, action) {
   return { ok: false, code: 'empty' };
 }
 
+// Same ordering as press(): wait for a running refresh before changing state,
+// otherwise refresh(true) would return that refresh and drop this update.
+async function recordKeyTestRocker(control, action, code) {
+  if (actionBusy || reconnecting) return;
+  if (pending) await pending;
+  if (actionBusy || reconnecting || rendering || !keyTest || committedOwner !== 'router') return;
+  actionBusy = true;
+  try {
+    keyTest = { count: keyTest.count + 1, last: { index: null, rocker: String(control), action: String(action), code: Number.isInteger(code) ? code : null, at: new Date().toISOString() } };
+    feedback = '';
+    feedbackError = false;
+    await refresh(true);
+  } finally { actionBusy = false; }
+}
+
 function handleRocker({ control, action, code } = {}) {
   // The key test screen records rockers instead of acting on them, so their
   // physical direction can be checked against ROCKERS_XL.
   if (committedOwner === 'router' && keyTest) {
-    if (actionBusy) return;
-    actionBusy = true;
-    keyTest = { count: keyTest.count + 1, last: { index: null, rocker: String(control), action: String(action), code: Number.isInteger(code) ? code : null, at: new Date().toISOString() } };
-    void refresh(true).catch(() => {}).finally(() => { actionBusy = false; });
+    void recordKeyTestRocker(control, action, code).catch(() => {});
     return;
   }
   const record = result => {
@@ -683,10 +698,13 @@ async function press(index, revision, heldMs = 0, inputCode = null) {
         lastRender = '';
         lastSummary = '';
         feedback = '';
+        feedbackError = false;
         await refresh(true);
         return { ok: true, code: 'navigated' };
       }
       const profile = PROFILES[layout.model];
+      feedback = '';
+      feedbackError = false;
       keyTest = { count: keyTest.count + 1, last: { index, code: Number.isInteger(inputCode) ? inputCode : null, row: Math.floor(index / layout.cols), col: index % layout.cols, slot: profile.slotOf(index), heldMs, at: new Date().toISOString() } };
       await refresh(true);
       return { ok: true, code: 'updated' };
