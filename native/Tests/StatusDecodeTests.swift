@@ -80,6 +80,16 @@ private func check(_ condition: @autoclosure () -> Bool, _ message: String) thro
         let otherState = try decoder.decode(DashboardState.self, from: otherWarning)
         try check(!otherState.claudeAccessibilityRequired, "unrelated warning")
 
+        try check(complete.settingsError == nil && partial.settingsError == nil && xl.settingsError == nil, "absent settings error")
+        let settingsError = try decoder.decode(DashboardState.self, from: load("status-settings-error.json"))
+        try check(settingsError.settingsError?.code == "settings_invalid_value" && settingsError.settingsError?.field == "brightness", "settings error code and field")
+        try check(settingsError.settingsError?.message == "brightness 값은 null 또는 0에서 100 사이의 정수여야 합니다.", "settings error message")
+        try check(settingsError.warnings == ["설정을 읽지 못했습니다."], "settings warning kept")
+        let unreadable = try decoder.decode(DashboardState.self, from: Data(#"{"device":{"connected":false},"settingsError":{"code":"settings_unreadable","field":null,"allowed":null,"message":"설정을 읽지 못했습니다."}}"#.utf8))
+        try check(unreadable.settingsError?.field == nil && unreadable.settingsError?.code == "settings_unreadable", "settings error without field")
+        let nullError = try decoder.decode(DashboardState.self, from: Data(#"{"device":{"connected":true},"settingsError":null}"#.utf8))
+        try check(nullError.settingsError == nil, "null settings error")
+
         let invalid = Data(#"{"device":{"connected":true},"summary":{"warning":"false"}}"#.utf8)
         do {
             _ = try decoder.decode(DashboardState.self, from: invalid)

@@ -25,9 +25,9 @@ import { createRemoteProvider } from './remote.mjs';
 import { readCredits } from './credits.mjs';
 import { createWorktreeService } from './worktrees.mjs';
 import { createCleanupService } from './cleanup.mjs';
-import { createSettings, validateSettingsPatch } from './settings.mjs';
+import { createSettings, SettingsError, validateSettingsPatch } from './settings.mjs';
 import { createNativeProviderSettings } from './native-provider-settings.mjs';
-import { translateKeys } from './i18n.mjs';
+import { translateKeys, translateUsage } from './i18n.mjs';
 import { createAlertTracker } from './alerts.mjs';
 import { createUpdater, readUpdateConfig } from './update.mjs';
 import { createModeRouter } from './modes.mjs';
@@ -135,6 +135,12 @@ const scenes = createSceneBridge();
 const sound = createSoundController();
 const settings = createSettings();
 let settingsWarning = null;
+let settingsError = null;
+// Only the validator's own fields leave the server: never file paths or raw user values.
+function publicSettingsError(error) {
+  if (!(error instanceof SettingsError)) return { code: 'settings_unreadable', field: null, allowed: null, message: '설정을 읽지 못했습니다.' };
+  return { code: String(error.code), field: typeof error.field === 'string' ? error.field.slice(0, 80) : null, allowed: error.allowed ?? null, message: String(error.message).slice(0, 300) };
+}
 let updateConfig = await readUpdateConfig();
 let updater = createUpdater({ remoteUrl: updateConfig.remoteUrl || null, branch: updateConfig.branch || 'main' });
 let updateSnapshot = { configured: updateConfig.enabled === true, status: updateConfig.enabled ? 'local_only' : 'not_configured', canCheck: updateConfig.enabled === true, canPrepare: false };
@@ -142,7 +148,7 @@ let updatePending;
 let updateReview = null;
 let updateConfigLastAttempt = 0;
 try { await settings.load(); sound.setEnabled(settings.get().sound.enabled); }
-catch { settingsWarning = '설정을 읽지 못했습니다.'; }
+catch (error) { settingsWarning = '설정을 읽지 못했습니다.'; settingsError = publicSettingsError(error); }
 let lastInteraction = Date.now();
 let autoScene = false;
 const remoteProvider = createRemoteProvider();
@@ -530,7 +536,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
       if (parcelImportReview?.stage === 'review' && Date.parse(parcelImportReview.expiresAt || '') <= Date.now()) { parcelImporter.cancel(); parcelImportReview = null; }
       if (remoteReview?.stage === 'review' && Date.parse(remoteReview.expiresAt || '') <= Date.now()) { remoteProvider.cancel(); remoteReview = null; }
       if (updateReview?.stage === 'review' && Date.parse(updateReview.expiresAt || '') <= Date.now()) { updater.cancel(); updateReview = null; }
-      const usage = usageSnapshot;
+      const usage = translateUsage(usageSnapshot, settings.get().language || 'ko');
       const serviceWarnings = [...(result.warnings || []), ...(settingsWarning ? [settingsWarning] : [])];
       syncLayout();
       const basePlan = deck.plan(agents, usage, layout);
@@ -618,7 +624,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
           if (summaryRendered || device.status().mode === 'simulator') lastSummary = summaryKey;
         }
       } finally { rendering = false; }
-      snapshot = { device: device.status(), agents, usage, settings: settings.get(), ...(nativeToken ? { summary: nativeSummary } : {}), lastInput: lastInputOutcome, keyTest: publicKeyTest(), cleanup: publicReview(cleanupState), worktreeReview: publicReview(worktreeReview), parcelReview: publicParcelReview(parcelReview), parcelImportReview: publicParcelImportReview(parcelImportReview), remoteReview: publicRemoteReview(remoteReview), updateReview: publicUpdateReview(updateReview), warnings: serviceWarnings, updatedAt, refreshIntervalMs: interval,
+      snapshot = { device: device.status(), agents, usage, settings: settings.get(), ...(nativeToken ? { summary: nativeSummary } : {}), lastInput: lastInputOutcome, keyTest: publicKeyTest(), cleanup: publicReview(cleanupState), worktreeReview: publicReview(worktreeReview), parcelReview: publicParcelReview(parcelReview), parcelImportReview: publicParcelImportReview(parcelImportReview), remoteReview: publicRemoteReview(remoteReview), updateReview: publicUpdateReview(updateReview), settingsError, warnings: serviceWarnings, updatedAt, refreshIntervalMs: interval,
         deck: committedDeck ? { ...committedDeck, message: feedback || committedDeck.message } : null };
     } catch (error) {
       const warnings = [`상태를 갱신하지 못했습니다: ${error.message}`];
@@ -1136,7 +1142,8 @@ const server = http.createServer(async (req, res) => {
       let body = '';
       for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 4096) return send(res, 413, { error: 'Request too large' }); }
       let patch;
-      try { patch = JSON.parse(body); validateSettingsPatch(patch); } catch { return send(res, 400, { error: 'Invalid settings' }); }
+      try { patch = JSON.parse(body); validateSettingsPatch(patch); }
+      catch (error) { return send(res, 400, { error: 'Invalid settings', ...(error instanceof SettingsError ? publicSettingsError(error) : {}) }); }
       if (actionBusy) return send(res, 409, { ok: false, code: 'busy', message: '다른 동작이 진행 중입니다.' });
       if (pending) await pending;
       if (rendering || actionBusy) return send(res, 409, { ok: false, code: 'busy', message: '화면을 갱신 중입니다.' });
@@ -1152,7 +1159,7 @@ const server = http.createServer(async (req, res) => {
         }
         let next;
         try { next = await settings.update(patch); }
-        catch {
+        catch (error) {
           if (brightnessApplied) {
             let restored = false;
             if (Number.isInteger(previousRequestedBrightness) && previousRequestedBrightness >= 0 && previousRequestedBrightness <= 100) {
@@ -1160,7 +1167,7 @@ const server = http.createServer(async (req, res) => {
             }
             if (!restored) return send(res, 409, { ok: false, code: 'brightness_applied_not_saved', message: '밝기는 장치에 적용됐지만 설정을 저장하지 못했습니다. 이전 밝기는 확인할 수 없습니다.' });
           }
-          return send(res, 409, { ok: false, code: 'settings_not_saved', message: '설정을 저장하지 못했습니다.' });
+          return send(res, 409, { ok: false, code: 'settings_not_saved', message: '설정을 저장하지 못했습니다.', ...(error instanceof SettingsError ? { settingsError: publicSettingsError(error) } : {}) });
         }
         sound.setEnabled(next.sound.enabled);
         await refresh(true);

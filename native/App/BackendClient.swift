@@ -201,6 +201,13 @@ struct AppSettings: Codable, Equatable {
     var screensaver: ScreenSettings
 }
 
+/// Sanitized settings validation error from the engine. `allowed` is not decoded: its shape varies by field.
+struct SettingsErrorInfo: Decodable {
+    var code: String?
+    var field: String?
+    var message: String?
+}
+
 struct DashboardState: Decodable {
     var device: DeviceState
     var agents: [AgentState]?
@@ -214,6 +221,7 @@ struct DashboardState: Decodable {
     var parcelImportReview: ReviewEnvelope?
     var remoteReview: ReviewEnvelope?
     var updateReview: ReviewEnvelope?
+    var settingsError: SettingsErrorInfo?
     var warnings: [String]?
     var updatedAt: String?
 

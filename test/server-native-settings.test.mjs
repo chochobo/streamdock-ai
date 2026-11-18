@@ -71,8 +71,19 @@ test('native settings and provider APIs require the launch token and preserve re
   assert.equal(diagnostics.codex.trust, 'unknown');
   assert.ok(!JSON.stringify(diagnostics).includes('not-returned-as-diagnostics'));
   assert.equal((await post('/api/native/settings', { language: 'en' }, { Origin: 'http://evil.invalid' })).status, 403);
-  assert.equal((await post('/api/native/settings', { brightness: 101, language: 'en' })).status, 400);
-  assert.equal((await post('/api/native/settings', { version: 1 })).status, 400);
+  assert.equal(status.settingsError, null);
+  const outOfRange = await post('/api/native/settings', { brightness: 101, language: 'en' });
+  assert.equal(outOfRange.status, 400);
+  assert.deepEqual(await outOfRange.json(), { error: 'Invalid settings', code: 'settings_invalid_value', field: 'brightness',
+    allowed: { type: 'integer', min: 0, max: 100, nullable: true }, message: 'brightness 값은 null 또는 0에서 100 사이의 정수여야 합니다.' });
+  const readonly = await post('/api/native/settings', { version: 1 });
+  assert.equal(readonly.status, 400);
+  assert.equal((await readonly.json()).code, 'settings_readonly_field');
+  const unknown = await (await post('/api/native/settings', { secretValue123: 'raw-user-value' })).json();
+  assert.equal(unknown.code, 'settings_unknown_field');
+  assert.ok(!JSON.stringify(unknown).includes('raw-user-value'));
+  const badJson = await fetch(`${base}/api/native/settings`, { method: 'POST', headers: { ...auth, Origin: base, 'Content-Type': 'application/json' }, body: '{' });
+  assert.deepEqual(await badJson.json(), { error: 'Invalid settings' });
   assert.equal((await (await get('/api/native/settings')).json()).settings.language, 'ko');
   const settingsPath = path.join(home, '.config', 'streamdock-ai', 'settings.json');
   await mkdir(path.dirname(settingsPath), { recursive: true });
@@ -91,7 +102,10 @@ test('native settings and provider APIs require the launch token and preserve re
   await writeFile(settingsPath, 'invalid-again');
   const rolledBack = await post('/api/native/settings', { brightness: 43 });
   assert.equal(rolledBack.status, 409);
-  assert.equal((await rolledBack.json()).code, 'settings_not_saved');
+  const rolledBackBody = await rolledBack.json();
+  assert.equal(rolledBackBody.code, 'settings_not_saved');
+  assert.equal(rolledBackBody.settingsError.code, 'settings_invalid_json');
+  assert.ok(!JSON.stringify(rolledBackBody).includes(home));
   assert.equal(await readFile(settingsPath, 'utf8'), 'invalid-again');
   const afterRollback = await (await fetch(`${base}/api/refresh`, { method: 'POST', headers: { Origin: base } })).json();
   assert.equal(afterRollback.device.requestedBrightness, 42);
@@ -123,4 +137,34 @@ test('usage reports a sanitized Claude Desktop accessibility issue', { timeout: 
   while(Date.now()<deadline){if(child.exitCode!==null||child.signalCode!==null)throw Error('isolated server stopped');try{const response=await fetch(`${base}/api/status`);if(response.ok){status=await response.json();if(status.usage?.issues?.length)break}}catch{}await delay(50)}
   assert.deepEqual(status?.usage?.issues,[{provider:'claude-desktop',code:'permission_required'}]);
   assert.ok(!JSON.stringify(status).includes('must-not-leak'));
+});
+
+test('status exposes a sanitized settings error when the settings file is invalid', { timeout: 15000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'streamdock-settings-error-'));
+  const settingsPath = path.join(home, '.config', 'streamdock-ai', 'settings.json');
+  await mkdir(path.dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, JSON.stringify({ version: 1, language: 'ko', sound: { enabled: false }, brightness: 250, screensaver: { enabled: true, idleMinutes: 5, scene: 'rain' } }));
+  const port = await freePort(), base = `http://127.0.0.1:${port}`;
+  const env = { ...process.env, HOME: home, PORT: String(port), STREAMDOCK_USAGE_DISABLED: '1', STREAMDOCK_PRESENCE_DISABLED: '1', STREAMDOCK_DESKTOP_USAGE_DISABLED: '1', STREAMDOCK_FEATURE_NETWORK_DISABLED: '1' };
+  const child = spawn(process.execPath, ['src/server.mjs'], { cwd: root, env, stdio: 'ignore' });
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit').catch(() => {}); child.kill('SIGTERM');
+      let timer; await Promise.race([exited, new Promise(resolve => { timer = setTimeout(resolve, 3000); })]); clearTimeout(timer);
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+    await rm(home, { recursive: true, force: true });
+  });
+  const deadline = Date.now() + 12000;
+  let status;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) throw Error('isolated server stopped');
+    try { const r = await fetch(`${base}/api/status`); if (r.ok) { status = await r.json(); if (status.deck) break; } } catch { /* Starting. */ }
+    await delay(50);
+  }
+  assert.deepEqual(status?.settingsError, { code: 'settings_invalid_value', field: 'brightness',
+    allowed: { type: 'integer', min: 0, max: 100, nullable: true }, message: 'brightness 값은 null 또는 0에서 100 사이의 정수여야 합니다.' });
+  assert.ok(status.warnings.includes('설정을 읽지 못했습니다.'));
+  assert.ok(!JSON.stringify(status.settingsError).includes(home));
+  assert.ok(!JSON.stringify(status.settingsError).includes('250'));
 });
