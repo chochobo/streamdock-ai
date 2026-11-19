@@ -1,0 +1,12 @@
+{
+  "device": { "connected": true, "model": "Stream Dock 293S V3" },
+  "settings": { "version": 1, "language": "ko", "sound": { "enabled": false }, "brightness": null, "screensaver": { "enabled": true, "idleMinutes": 5, "scene": "aquarium" } },
+  "settingsError": {
+    "code": "settings_invalid_value",
+    "field": "brightness",
+    "allowed": { "type": "integer", "min": 0, "max": 100, "nullable": true },
+    "message": "brightness 값은 null 또는 0에서 100 사이의 정수여야 합니다."
+  },
+  "warnings": ["설정을 읽지 못했습니다."],
+  "updatedAt": null
+}

@@ -605,6 +605,12 @@ private struct DiagnosticsView: View {
             if client.state?.claudeAccessibilityRequired == true {
                 Section("Claude 사용량") { AccessibilityHelpView() }
             }
+            if let settingsError = client.state?.settingsError {
+                Section("설정") {
+                    Text("설정 오류: \(settingsError.message ?? "설정을 읽지 못했습니다.")\(settingsError.field.map { " (항목: \($0))" } ?? "")")
+                        .foregroundStyle(.orange).textSelection(.enabled)
+                }
+            }
             if let warnings = client.state?.warnings, !warnings.isEmpty {
                 Section("알림") { ForEach(warnings, id: \.self) { Text($0).textSelection(.enabled) } }
             }

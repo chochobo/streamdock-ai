@@ -81,3 +81,24 @@ export function translateKeys(keys, language) {
     return {...key,label:systemLabelId.test(key.id) ? translate(key.label) : key.label,caption:generatedCaptionId.test(key.id) ? translate(key.caption) : key.caption};
   });
 }
+
+// Placeholder account labels the usage providers build. Only accounts with these
+// system ids are translated; real account names (emails, org names) are never touched.
+const accountLabels = Object.freeze({
+  'Codex 연결 계정':'Codex account','Codex 이전 확인 (계정 미확인)':'Codex last known (account unknown)',
+  'Claude 계정 미확인':'Claude (account unknown)','Claude Code · 계정 미확인':'Claude Code · account unknown',
+  'Claude · AgentDeck · 계정 미확인':'Claude · AgentDeck · account unknown','Claude Desktop · 계정 미확인':'Claude Desktop · account unknown',
+});
+const systemAccountId = /^(?:codex-local-account|codex-unavailable|claude-unavailable|claude-statusline|claude-agentdeck|claude-desktop-ax)$/;
+
+const translateAccount = account => account && typeof account === 'object' && typeof account.id === 'string' && systemAccountId.test(account.id) && Object.hasOwn(accountLabels, account.label)
+  ? {...account,label:accountLabels[account.label]} : account;
+
+/** Translate app-owned placeholder account labels in a usage snapshot, including its pace summary. */
+export function translateUsage(usage, language) {
+  if (language !== 'en' || !usage || typeof usage !== 'object' || !Array.isArray(usage.accounts)) return usage;
+  const pace = usage.pace && typeof usage.pace === 'object'
+    ? {...usage.pace,accounts:Array.isArray(usage.pace.accounts) ? usage.pace.accounts.map(translateAccount) : usage.pace.accounts,recommendation:translateAccount(usage.pace.recommendation)}
+    : usage.pace;
+  return {...usage,accounts:usage.accounts.map(translateAccount),...(Object.hasOwn(usage,'pace') ? {pace} : {})};
+}

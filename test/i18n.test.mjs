@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { translateKeys } from '../src/i18n.mjs';
+import { translateKeys, translateUsage } from '../src/i18n.mjs';
 import { featureItems } from '../src/feature-pages.mjs';
 
 test('translates app-owned control and feature text and preserves dynamic values', () => {
@@ -76,4 +76,30 @@ test('english feature pages leave no Hangul in system-owned labels', () => {
   }
   const windows = ['7일','5시간','90분','기본 한도','추가 한도'].map(windowLabel => ({kind:'quota',windowLabel}));
   for (const key of translateKeys(windows,'en')) assert.ok(!hangul.test(key.windowLabel), key.windowLabel);
+});
+
+test('translates placeholder account labels only for system account ids', () => {
+  const usage = {
+    accounts: [
+      {id:'codex-local-account',provider:'codex',label:'Codex 연결 계정'},
+      {id:'claude-unavailable',provider:'claude',label:'Claude 계정 미확인'},
+      {id:'codex-unavailable',provider:'codex',label:'Codex 연결 계정'},
+      {id:'claude-statusline',provider:'claude',label:'Claude Code · 계정 미확인'},
+      {id:'claude-agentdeck',provider:'claude',label:'Claude · AgentDeck · 계정 미확인'},
+      {id:'claude-desktop-ax',provider:'claude',label:'Claude Desktop · 계정 미확인'},
+      {id:'codex-local-account',provider:'codex',label:'Codex 이전 확인 (계정 미확인)'},
+      {id:'claude-user@example.com',provider:'claude',label:'Claude 계정 미확인'},
+      {id:'claude-statusline',provider:'claude',label:'내 회사 계정'},
+    ],
+    pace: {accounts:[{id:'codex-local-account',label:'Codex 연결 계정',windows:[]}],recommendation:{id:'codex-local-account',label:'Codex 연결 계정',remainingPercent:40,durationMinutes:300}},
+    warnings: [],
+  };
+  const got = translateUsage(usage,'en');
+  assert.deepEqual(got.accounts.map(a=>a.label),['Codex account','Claude (account unknown)','Codex account','Claude Code · account unknown','Claude · AgentDeck · account unknown','Claude Desktop · account unknown','Codex last known (account unknown)','Claude 계정 미확인','내 회사 계정']);
+  assert.equal(got.pace.accounts[0].label,'Codex account');
+  assert.equal(got.pace.recommendation.label,'Codex account');
+  assert.equal(usage.accounts[0].label,'Codex 연결 계정');
+  assert.equal(translateUsage(usage,'ko'),usage);
+  assert.equal(translateUsage({accounts:[],pace:{accounts:[],recommendation:null}},'en').pace.recommendation,null);
+  assert.equal(translateUsage(null,'en'),null);
 });
