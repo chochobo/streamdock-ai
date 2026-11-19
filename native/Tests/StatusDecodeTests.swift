@@ -131,6 +131,29 @@ private func check(_ condition: @autoclosure () -> Bool, _ message: String) thro
             _ = try decoder.decode(DashboardState.self, from: invalid)
             throw TestFailure.failed("warning must be a boolean")
         } catch is DecodingError { /* Incorrect backend types fail explicitly. */ }
+
+        // Preview fallback text follows the settings language; missing or unknown means Korean.
+        try check(complete.settings?.language == "ko", "fixture language")
+        let noSettings = try decoder.decode(DashboardState.self, from: Data(#"{"device":{"connected":true}}"#.utf8))
+        try check(noSettings.settings?.language == nil, "missing language")
+        func side(_ slot: Int, _ language: String?, summary: Bool = true, warning: Bool? = nil, project: String? = nil) -> String {
+            PreviewText.side(slot: slot, working: 2, blocked: 1, done: 3, warning: warning, attentionProject: project,
+                             time: "09:05", hasSummary: summary, language: language)
+        }
+        for language in [nil, "ko", "xx"] as [String?] {
+            try check(side(16, language) == "작업 2\n확인 1\n완료 3", "ko slot 16")
+            try check(side(17, language) == "알림 없음" && side(17, language, warning: true) == "알림 확인", "ko slot 17")
+            try check(side(17, language, project: "demo") == "demo", "attention project")
+            try check(side(18, language) == "갱신\n09:05", "ko slot 18")
+            try check(side(16, language, summary: false) == "확인 중", "ko loading")
+            try check(PreviewText.summaryKeyPlaceholder(language: language) == "요약", "ko summary key")
+        }
+        try check(side(16, "en") == "WORK 2\nASK 1\nDONE 3", "en slot 16")
+        try check(side(17, "en") == "ALERT NONE" && side(17, "en", warning: true) == "STATUS CHECK", "en slot 17")
+        try check(side(17, "en", project: "demo") == "demo", "en attention project")
+        try check(side(18, "en") == "UPDATED\n09:05", "en slot 18")
+        try check(side(16, "en", summary: false) == "CHECKING", "en loading")
+        try check(PreviewText.summaryKeyPlaceholder(language: "en") == "SUMMARY", "en summary key")
         print("Native status decoding fixtures passed")
     }
 }
