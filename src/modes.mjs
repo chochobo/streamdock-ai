@@ -151,7 +151,8 @@ export function createModeRouter() {
       const bar = safeBar(item.bar);
       const memory = !isHub && mode === 'machines' && id === 'machine-memory' ? safeMemory(item.memory, bar) : null;
       keys[index] = {
-        index, id, label: safeText(item.label || id), detail: safeText(item.detail),
+        // A widget slice or a blank key has no name; falling back to the id would expose "dash-usage-1" to the app preview.
+        index, id, label: item.kind === 'wide' || (item.state === 'empty' && !item.label) ? '' : safeText(item.label || id), detail: safeText(item.detail),
         state: safeText(item.state || (isHub ? 'control' : 'idle'), 24),
         kind: safeText(item.kind || (isHub ? 'control' : 'feature'), 24),
         caption: safeText(item.caption, 40), action: enabled ? action : 'none', disabled: !enabled,

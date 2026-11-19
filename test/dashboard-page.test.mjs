@@ -84,3 +84,12 @@ test('English mode keeps the widget data and tells the renderer the language', (
   assert.equal(keys[0].wide.type, 'usage');
   assert.equal(keys[0].language, 'en');
 });
+
+test('widget and blank keys carry no name, so the app never shows an internal id', () => {
+  const router = createModeRouter();
+  router.openMode('dashboard');
+  const plan = router.planPage({ items, availability: { dashboard: true }, layout: XL });
+  for (const index of [0, 6, 8, 16, 22, 24, 28]) assert.equal(plan.keys[index].label, '', `key ${index}`);
+  assert.doesNotMatch(JSON.stringify(plan.keys), /"label":"dash-/);
+  assert.equal(plan.keys[29].label, '뒤로', 'real controls keep their names');
+});

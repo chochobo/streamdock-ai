@@ -158,7 +158,9 @@ function recordMachineSample(value) {
   const cpu = Number.isFinite(value?.cpuPercent) ? value.cpuPercent : null;
   const memory = value?.metricStatus?.memoryUsedPercent !== 'unavailable' && Number.isFinite(value?.memoryUsedPercent) ? value.memoryUsedPercent : null;
   if (cpu === null && memory === null) return;
-  machineHistory.push({ cpu, mem: memory });
+  // One decimal is plenty for a 60 px graph and keeps the per-second payload small.
+  const round = value => (value === null ? null : Math.round(value * 10) / 10);
+  machineHistory.push({ cpu: round(cpu), mem: round(memory) });
   if (machineHistory.length > MACHINE_HISTORY_MAX) machineHistory.shift();
 }
 let machineLastAttempt = 0;
