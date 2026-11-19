@@ -37,12 +37,23 @@ export function imagePackets(id, jpeg) {
   return packets;
 }
 
+// Reports use ACK bytes 0–2 and OK bytes 5–6; byte 9 is the input code, byte 10: 0 release, 1 press.
+function validInputReport(data) {
+  return Boolean(data && data.length >= 11 && data[0] === 0x41 && data[1] === 0x43 && data[2] === 0x4b &&
+    data[5] === 0x4f && data[6] === 0x4b && (data[10] === 0 || data[10] === 1));
+}
+
 export function keyEventFromReport(data, profile = PROFILES['293sv3']) {
-  // Reports use ACK bytes 0–2 and OK bytes 5–6; byte 9 is the input code, byte 10: 0 release, 1 press.
-  if (!data || data.length < 11 || data[0] !== 0x41 || data[1] !== 0x43 || data[2] !== 0x4b ||
-      data[5] !== 0x4f || data[6] !== 0x4b || (data[10] !== 0 && data[10] !== 1)) return null;
+  if (!validInputReport(data)) return null;
   const index = profile.indexOfCode(data[9]);
   return index < 0 ? null : { index, phase: data[10] === 1 ? 'down' : 'up' };
+}
+
+/** Rocker input from a report: { code, control, action, phase }, or null for keys and unknown codes. */
+export function controlEventFromReport(data, profile = PROFILES['293sv3']) {
+  if (!validInputReport(data) || !Object.hasOwn(profile.rockers, data[9])) return null;
+  const { rocker, dir } = profile.rockers[data[9]];
+  return { code: data[9], control: rocker, action: dir, phase: data[10] === 1 ? 'down' : 'up' };
 }
 
 export function keyIndexFromReport(data, profile = PROFILES['293sv3']) {
@@ -272,14 +283,16 @@ async function officialAppRunning() {
  * of the single connected supported device; profile() returns the current one.
  * onKey(index): receives a zero-based row-major position on a key press.
  * onKeyEvent(index, phase, heldMs): down/up/cancel; durations are monotonic and bounded.
+ * onControl({control, action, phase}): a rocker press (XL only): control left|right,
+ *   action up|down|push, phase 'down'. A held rocker fires once until released.
  * renderImages({keys, sides}) writes supplied PNG/JPEG buffers only, converted to the model's size.
  * render accepts [{index, label, state, estimated}]. status distinguishes HID connection
  * from simulation. start and stop never modify the device's boot image.
  */
-export function createDevice({ mode = 'simulator', profile: initialProfile = PROFILES['293sv3'], onKey = () => {}, onKeyEvent = () => {}, maxHoldMs = 60_000, dependencies } = {}) {
+export function createDevice({ mode = 'simulator', profile: initialProfile = PROFILES['293sv3'], onKey = () => {}, onKeyEvent = () => {}, onControl = () => {}, maxHoldMs = 60_000, dependencies } = {}) {
   if (!['simulator', 'hardware'].includes(mode)) throw new Error('Unknown device mode');
   if (!Object.values(PROFILES).includes(initialProfile)) throw new TypeError('Unknown device profile');
-  if (typeof onKey !== 'function' || typeof onKeyEvent !== 'function') throw new TypeError('Key callbacks must be functions');
+  if (typeof onKey !== 'function' || typeof onKeyEvent !== 'function' || typeof onControl !== 'function') throw new TypeError('Key callbacks must be functions');
   if (!Number.isSafeInteger(maxHoldMs) || maxHoldMs < 10 || maxHoldMs > 300_000) throw new RangeError('Invalid maximum hold time');
   let profile = initialProfile;
   let state = { connected: false, model: mode === 'simulator' ? 'Simulator' : modelName(profile, profile.vendorId, profile.productIds[0]), error: null, mode };
@@ -290,6 +303,8 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
   const pressed = new Map();
   // Timed-out keys stay suppressed until release; missing releases cannot create repeat presses.
   const expired = new Set();
+  // Rocker codes held down; a missing release cannot create repeat presses.
+  const heldControls = new Set();
   const clock = dependencies?.now || (() => performance.now());
   function invoke(callback, ...args) {
     try {
@@ -308,6 +323,7 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
     }
     pressed.clear();
     expired.clear();
+    heldControls.clear();
   }
   function input(data) {
     if (!handle) return;
@@ -320,6 +336,14 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
     // Do not dispatch a button against a previous screen while initial images
     // are still being sent after startup or reconnection.
     if (!state.connected) return;
+    const control = controlEventFromReport(data, profile);
+    if (control) {
+      if (control.phase === 'up') { heldControls.delete(control.code); return; }
+      if (heldControls.has(control.code)) return;
+      heldControls.add(control.code);
+      invoke(onControl, { control: control.control, action: control.action, phase: 'down' });
+      return;
+    }
     const event = keyEventFromReport(data, profile);
     if (!event) return;
     const { index, phase } = event;

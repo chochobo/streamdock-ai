@@ -84,7 +84,7 @@ const device = deviceFactory({ mode, profile: initialProfile, onKeyEvent: (index
     }
     handlePhysicalPress(index, heldMs);
   }
-} });
+}, onControl: event => handleRocker(event) });
 let snapshot = { device: { connected: false, model: '', error: '시작 중' }, agents: [], warnings: [], updatedAt: null, refreshIntervalMs: interval };
 let pending;
 let reconnecting = false;
@@ -340,6 +340,64 @@ function recordPhysicalInput(index, result) {
 
 function handlePhysicalPress(index, heldMs) {
   void press(index, undefined, heldMs).then(result => recordPhysicalInput(index, result)).catch(() => recordPhysicalInput(index, { code: 'error' }));
+}
+
+// XL rockers (#8). Default mapping, change it here:
+// left up/down = the visible prev/next key, left push = the visible back key
+// (each only when that key is shown and enabled); right up/down = brightness
+// ±10 within 0..100, saved like the brightness setting; right push = reserved.
+// Scenes and games ignore rockers.
+const ROCKER_KEYS = { up: 'prev', down: 'next', push: 'back' };
+const ROCKER_BRIGHTNESS_STEP = { up: 10, down: -10 };
+// The rocker never turns the screen fully off (an unlabelled control could make
+// the device look dead). The settings range itself stays 0..100.
+const ROCKER_BRIGHTNESS_MIN = 10;
+// With no saved or sent brightness the device keeps its own level, which the app
+// cannot read. Step from the middle so neither direction jumps to an extreme.
+const ROCKER_BRIGHTNESS_UNKNOWN = 50;
+
+async function rockerAction(control, action) {
+  if (reconnecting || legacyFrameActive()) return { ok: false, code: 'ignored' };
+  if (control === 'left' && Object.hasOwn(ROCKER_KEYS, action)) {
+    const key = committedDeck?.keys?.find(k => k.kind === 'control' && !k.disabled && k.action === ROCKER_KEYS[action]);
+    return key ? press(key.index) : { ok: false, code: 'empty' };
+  }
+  if (control === 'right' && Object.hasOwn(ROCKER_BRIGHTNESS_STEP, action)) {
+    if (rendering || actionBusy) return { ok: false, code: 'busy' };
+    if (pending) await pending;
+    if (rendering || actionBusy) return { ok: false, code: 'busy' };
+    actionBusy = true;
+    lastInteraction = Date.now();
+    try {
+      const requested = device.status().requestedBrightness;
+      const saved = settings.get().brightness;
+      const current = Number.isInteger(requested) ? requested : Number.isInteger(saved) ? saved : ROCKER_BRIGHTNESS_UNKNOWN;
+      const step = ROCKER_BRIGHTNESS_STEP[action];
+      // Going down never passes the floor and never brightens a level already below it.
+      const value = step > 0 ? Math.min(100, current + step) : Math.max(Math.min(current, ROCKER_BRIGHTNESS_MIN), current + step);
+      if (value === current && saved === value) return { ok: true, code: 'unchanged' };
+      const changed = await device.setBrightness(value);
+      if (!changed && device.status().mode !== 'simulator') return { ok: false, code: 'unavailable' };
+      try {
+        await settings.update({ brightness: value });
+      } catch {
+        // Keep the device and the saved setting in agreement, as the app's settings endpoint does.
+        if (Number.isInteger(requested)) { try { await device.setBrightness(requested); } catch { /* Device error is reported by status. */ } }
+        return { ok: false, code: 'error' };
+      }
+      await refresh(true);
+      return { ok: true, code: 'updated' };
+    } finally { actionBusy = false; }
+  }
+  return { ok: false, code: 'empty' };
+}
+
+function handleRocker({ control, action } = {}) {
+  const record = result => {
+    lastInputOutcome = { control: String(control), action: String(action), code: typeof result?.code === 'string' ? result.code : 'error', at: new Date().toISOString() };
+    snapshot = { ...snapshot, lastInput: lastInputOutcome };
+  };
+  void rockerAction(control, action).then(record).catch(() => record({ code: 'error' }));
 }
 
 function publicReview(value) {
