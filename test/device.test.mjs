@@ -349,7 +349,7 @@ test('bar value, direction, age and thresholds trigger device repaint', async ()
   let count = writes.length;
   await device.render([key]);
   assert.equal(writes.length, count);
-  for (const bar of [ { value: 21, direction: 'used' }, { value: 21, direction: 'free' }, { value: 21, direction: 'free', stale: true }, { value: 21, direction: 'free', stale: true, warningAt: 75, criticalAt: 90 } ]) {
+  for (const bar of [ { value: 21, direction: 'used' }, { value: 21, direction: 'free' }, { value: 21, direction: 'free', stale: true }, { value: 21, direction: 'free', warningAt: 80, criticalAt: 90 } ]) {
     await device.render([{ ...key, bar }]);
     assert.equal(writes.length, count + 3);
     count = writes.length;
