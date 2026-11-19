@@ -16,7 +16,7 @@ test('defaults are inert, isolated copies, and do not create a file', async t =>
   const settings = createSettings({ file });
   const initial = await settings.load();
   assert.deepEqual(initial, { version: 1, language: 'ko', sound: { enabled: false }, brightness: null,
-    screensaver: { enabled: false, idleMinutes: 15, scene: 'aquarium' } });
+    screensaver: { enabled: false, idleMinutes: 15, scene: 'aquarium' }, rockers: { right: 'brightness' } });
   initial.sound.enabled = true;
   initial.screensaver.enabled = true;
   assert.equal(settings.get().sound.enabled, false);
@@ -105,4 +105,30 @@ test('reads recent external changes before a partial update', async t => {
   assert.equal(result.brightness, 80);
   assert.equal(result.sound.enabled, true);
   assert.equal(result.screensaver.enabled, false);
+});
+
+test('the right rocker setting defaults to brightness, persists, and rejects other values (#34)', async t => {
+  const { file } = await fixture(t);
+  const settings = createSettings({ file });
+  assert.equal((await settings.load()).rockers.right, 'brightness');
+  assert.equal((await settings.update({ rockers: { right: 'volume' } })).rockers.right, 'volume');
+  const reloaded = createSettings({ file });
+  assert.equal((await reloaded.load()).rockers.right, 'volume');
+  const before = await fs.readFile(file);
+  for (const patch of [{ rockers: { right: 'mute' } }, { rockers: { left: 'volume' } }, { rockers: 'volume' }, { rockers: { right: 1 } }, { rockers: null }]) {
+    await assert.rejects(reloaded.update(patch), error => error instanceof SettingsError);
+  }
+  assert.deepEqual(await fs.readFile(file), before);
+});
+
+test('a settings file written before the rocker setting existed still loads with the default', async t => {
+  const { file } = await fixture(t);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify({ version: 1, language: 'ko', sound: { enabled: true }, brightness: 40, screensaver: { enabled: false, idleMinutes: 15, scene: 'rain' } }), { mode: 0o600 });
+  const settings = createSettings({ file });
+  const loaded = await settings.load();
+  assert.equal(loaded.sound.enabled, true);
+  assert.equal(loaded.brightness, 40);
+  assert.deepEqual(loaded.rockers, { right: 'brightness' });
+  assert.equal((await settings.update({ brightness: 50 })).rockers.right, 'brightness');
 });
