@@ -280,6 +280,8 @@ struct DashboardState: Decodable {
     var connection: ConnectionState?
     var lastInput: LastInputState?
     var warnings: [String]?
+    /// Stable codes for `warnings`, same order (src/warnings.mjs). Older backends omit it.
+    var warningCodes: [String]?
     var updatedAt: String?
 
     /// Display name of the connected device, from the deck layout.

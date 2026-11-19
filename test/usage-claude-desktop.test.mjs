@@ -22,7 +22,8 @@ test('does not choose between conflicting UI badges', async () => {
   const provider = createClaudeDesktopUsageProvider({ query: async () => ({status:'ok',badges:[label,label.replace('7%', '8%')]}) });
   const result = await provider.read({ now: date });
   assert.equal(result.accounts.length, 0);
-  assert.match(result.warnings[0], /다른 사용량/);
+  assert.equal(result.warnings[0].code, 'claude_desktop_usage_ambiguous');
+  assert.match(result.warnings[0].message, /다른 사용량/);
 });
 
 test('unreadable UI never presents old value as current and expires it', async () => {
@@ -31,9 +32,11 @@ test('unreadable UI never presents old value as current and expires it', async (
   await provider.read({now:date}); ok = false;
   const stale = await provider.read({now:date+30_000});
   assert.equal(stale.accounts[0].status,'stale');
+  assert.deepEqual(stale.warnings.map(x => x.code),['claude_desktop_usage_stale']);
   assert.equal(stale.accounts[0].updatedAt,new Date(date).toISOString());
   const expired = await provider.read({now:date+60_001});
   assert.deepEqual(expired.accounts,[]);
+  assert.deepEqual(expired.warnings.map(x => x.code),['claude_desktop_usage_not_found']);
 });
 
 test('permission and unsupported platform do not launch or prompt', async () => {
@@ -44,7 +47,8 @@ test('permission and unsupported platform do not launch or prompt', async () => 
   const provider = createClaudeDesktopUsageProvider({query:async()=>({status:'permission_required',badges:[]})});
   const result = await provider.read({now:date});
   assert.deepEqual(result.accounts,[]);
-  assert.match(result.warnings[0], /권한/);
+  assert.equal(result.warnings[0].code, 'claude_desktop_permission_required');
+  assert.match(result.warnings[0].message, /권한/);
   assert.deepEqual(result.issues, [{ provider: 'claude-desktop', code: 'permission_required' }]);
 });
 

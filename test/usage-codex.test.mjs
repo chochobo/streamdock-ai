@@ -22,8 +22,8 @@ test('separate model limit buckets remain separate and invalid values are omitte
 test('failed reads preserve original timestamp, expire, and never report stale as current',async()=>{
   let fail=false; const p=createCodexUsageProvider({query:async()=>{if(fail)throw new Error('secret should not leak');return sample},maxStaleMs:1000});
   let r=await p.read({now:1794160000000}); assert.equal(r.accounts[0].status,'ok');
-  fail=true; r=await p.read({now:1794160000500}); assert.equal(r.accounts[0].status,'stale');assert.match(r.accounts[0].label,/계정 미확인/);assert.equal(r.accounts[0].updatedAt,new Date(1794160000000).toISOString());assert.equal(JSON.stringify(r).includes('secret'),false);
-  r=await p.read({now:1794160002000}); assert.equal(r.accounts[0].status,'unavailable');assert.deepEqual(r.accounts[0].windows,[]);
+  fail=true; r=await p.read({now:1794160000500}); assert.equal(r.accounts[0].status,'stale');assert.match(r.accounts[0].label,/계정 미확인/);assert.equal(r.accounts[0].updatedAt,new Date(1794160000000).toISOString());assert.equal(JSON.stringify(r).includes('secret'),false);assert.deepEqual(r.warnings.map(w=>w.code),['codex_usage_stale']);
+  r=await p.read({now:1794160002000}); assert.equal(r.accounts[0].status,'unavailable');assert.deepEqual(r.accounts[0].windows,[]);assert.deepEqual(r.warnings.map(w=>w.code),['codex_usage_unavailable']);
 });
 
 

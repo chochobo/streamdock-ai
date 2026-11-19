@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { warning } from './warnings.mjs';
 
 // Official Codex app-server protocol. Credentials remain under Codex's control;
 // this client does not read auth files, request login, or ask to refresh tokens.
@@ -116,9 +117,9 @@ export function createCodexUsageProvider({ query = queryCodexRateLimits, maxStal
           return { accounts: [account], warnings: [] };
         } catch {
           if (last && now >= Date.parse(last.updatedAt) && now - Date.parse(last.updatedAt) <= maxStaleMs) {
-            return { accounts: [{ ...last, label: 'Codex 이전 확인 (계정 미확인)', status: 'stale' }], warnings: ['Codex 사용량 갱신 실패: 마지막으로 확인한 값을 표시합니다.'] };
+            return { accounts: [{ ...last, label: 'Codex 이전 확인 (계정 미확인)', status: 'stale' }], warnings: [warning('codex_usage_stale', 'Codex 사용량 갱신 실패: 마지막으로 확인한 값을 표시합니다.')] };
           }
-          return { accounts: [{ id: 'codex-local-account', provider: 'codex', label: 'Codex 연결 계정', status: 'unavailable', updatedAt: null, windows: [] }], warnings: ['Codex 사용량을 확인할 수 없습니다.'] };
+          return { accounts: [{ id: 'codex-local-account', provider: 'codex', label: 'Codex 연결 계정', status: 'unavailable', updatedAt: null, windows: [] }], warnings: [warning('codex_usage_unavailable', 'Codex 사용량을 확인할 수 없습니다.')] };
         }
       })().finally(() => { inFlight = undefined; });
       return inFlight;

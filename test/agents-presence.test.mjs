@@ -88,15 +88,16 @@ test('partial process detection preserves positive matches and reports limited c
   const provider = {read:async()=>({codex:{available:false,ids:new Set([f.id])},claude:{available:false,ids:new Set()}})};
   const {agents,warnings} = await readAgents({home:f.home, now:f.now, presenceProvider:provider});
   assert.equal(agents[0].presence,'live');
-  assert.ok(warnings.some(x => x.includes('Codex')));
-  assert.ok(warnings.some(x => x.includes('Claude')));
+  assert.deepEqual(warnings.map(x => x.code), ['codex_sessions_partial', 'claude_sessions_partial']);
+  assert.ok(warnings.some(x => x.message.includes('Codex')));
+  assert.ok(warnings.some(x => x.message.includes('Claude')));
 });
 
 test('presence provider errors do not imply a session exited', async t => {
   const f = await fixture(t, {status:'unknown', ageMs:600_000});
   const {agents,warnings} = await readAgents({home:f.home, now:f.now, presenceProvider:{read:async()=>{throw new Error('private details');}}});
   assert.equal(agents[0].presence,'unknown');
-  assert.ok(warnings.length);
+  assert.deepEqual(warnings.map(x => x.code), ['sessions_unknown']);
   assert.ok(!JSON.stringify(warnings).includes('private details'));
 });
 

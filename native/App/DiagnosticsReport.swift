@@ -23,7 +23,7 @@ enum DiagnosticsReport {
         if let lastError = state.connection?.lastError, !lastError.isEmpty { lines.append("마지막 재연결 오류: \(redact(lastError))") }
         lines.append("마지막 입력: \(inputLabel(state.lastInput, now: now) ?? "없음")")
         let warnings = state.warnings ?? []
-        lines.append("알림: \(warnings.count)건\(warnings.isEmpty ? "" : " (\(warningKinds(warnings).joined(separator: ", ")))")")
+        lines.append("알림: \(warnings.count)건\(warnings.isEmpty ? "" : " (\(warningKinds(warnings, codes: state.warningCodes).joined(separator: ", ")))")")
         if let settingsError = state.settingsError {
             let field = settingsError.field.map { " · 항목 \(redact($0))" } ?? ""
             lines.append("설정 오류: \(settingsError.code.map(redact) ?? "unknown")\(field)")
@@ -74,8 +74,23 @@ enum DiagnosticsReport {
     }
 
     /// Coarse categories only: warning text can name accounts or projects.
-    static func warningKinds(_ warnings: [String]) -> [String] {
-        let kinds = warnings.map { warning -> String in
+    /// Diagnostics category per warning code; mirrors `category` in src/warnings.mjs.
+    static let warningCategories: [String: String] = [
+        "settings_unreadable": "settings", "refresh_failed": "status", "action_failed": "other",
+        "codex_history_unreadable": "other", "agent_history_unreadable": "other", "sessions_unknown": "other",
+        "claude_sessions_partial": "other", "codex_sessions_partial": "other",
+        "codex_usage_stale": "usage", "codex_usage_unavailable": "usage", "claude_usage_unavailable": "usage",
+        "claude_desktop_usage_stale": "other", "claude_desktop_permission_required": "usage",
+        "claude_desktop_usage_ambiguous": "usage", "claude_desktop_usage_not_found": "usage",
+        "claude_desktop_usage_unreadable": "usage", "credits_unreadable": "credits",
+        "credits_source_unsupported": "other", "credits_browser_setup_required": "settings",
+    ]
+
+    /// Classify by code when the backend sends one; otherwise fall back to the message text.
+    static func warningKinds(_ warnings: [String], codes: [String]? = nil) -> [String] {
+        let usable = codes?.count == warnings.count ? codes : nil
+        let kinds = warnings.enumerated().map { index, warning -> String in
+            if let code = usable?[index], let category = warningCategories[code] { return category }
             if warning.contains("설정") { return "settings" }
             if warning.contains("크레딧") { return "credits" }
             if warning.contains("사용량") { return "usage" }

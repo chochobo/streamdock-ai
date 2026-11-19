@@ -1,3 +1,5 @@
+import { WARNING_CODES, warningCode } from './warnings.mjs';
+
 // The 293s V3 has three display-only 96 × 96 image slots. Their physical
 // order must be verified on the device; the protocol order is 16, 17, 18.
 const SIZE = 96;
@@ -34,17 +36,16 @@ function shorten(value, budget = 62) {
 }
 
 /** Summarize only observed states; unknown states are never counted as safe. */
-// Only map known diagnostic messages. Never copy arbitrary warnings to the device.
+// Classify by stable warning code (src/warnings.mjs); plain strings fall back to
+// the legacy exact-text rules. Never copy arbitrary warnings to the device.
 function warningKind(warnings) {
-  const values = new Set(Array.isArray(warnings) ? warnings.filter(value => typeof value === 'string') : []);
-  if (!values.size) return null;
-  if (values.has('설정을 읽지 못했습니다.')) return 'settings';
-  if ([...values].some(value => value.startsWith('상태를 갱신하지 못했습니다:'))) return 'refresh';
-  if (values.has('Cannot read Codex session directory')) return 'codex_history';
-  if (values.has('Cannot read streamdock-hook agent status directory') || values.has('Cannot read agentdeck-hook agent status directory')) return 'agent_history';
-  const claude = values.has('Claude 세션 실행 여부를 일부 확인할 수 없습니다.');
-  const codex = values.has('Codex 열린 세션을 일부 확인할 수 없습니다.');
-  if (values.has('세션 실행 여부를 확인할 수 없습니다.') || (claude && codex)) return 'sessions';
+  const items = Array.isArray(warnings) ? warnings.filter(value => typeof value === 'string' || typeof value?.code === 'string' || typeof value?.message === 'string') : [];
+  if (!items.length) return null;
+  const kinds = new Set(items.map(value => WARNING_CODES[warningCode(value)]?.summary || 'other'));
+  for (const kind of ['settings', 'refresh', 'codex_history', 'agent_history', 'sessions']) if (kinds.has(kind)) return kind;
+  const claude = kinds.has('claude_sessions');
+  const codex = kinds.has('codex_sessions');
+  if (claude && codex) return 'sessions';
   if (claude) return 'claude_sessions';
   if (codex) return 'codex_sessions';
   return 'other';

@@ -67,6 +67,11 @@ private func check(_ condition: @autoclosure () -> Bool, _ message: String) thro
         try check(partialLayoutState.deck?.keys.count == 1 && partialLayoutState.device.connected, "partial layout keeps the rest of the status")
         try check(partialLayoutState.deck?.deckLayout == .s293, "partial layout falls back to 293S")
 
+        try check(DiagnosticsReport.warningKinds(["문구가 바뀐 경고"], codes: ["credits_unreadable"]) == ["credits"], "warning code wins over text")
+        try check(DiagnosticsReport.warningKinds(["설정을 읽지 못했습니다."], codes: nil) == ["settings"], "text fallback without codes")
+        try check(DiagnosticsReport.warningKinds(["a", "b"], codes: ["credits_unreadable"]) == ["other"], "mismatched code count falls back to text")
+        let coded = try decoder.decode(DashboardState.self, from: Data(#"{"device":{"connected":true},"warnings":["x"],"warningCodes":["refresh_failed"]}"#.utf8))
+        try check(coded.warningCodes == ["refresh_failed"], "warning codes decode")
         let structuredPermission = Data(#"{"device":{"connected":false},"usage":{"issues":[{"provider":"claude-desktop","code":"permission_required"}]}}"#.utf8)
         let structuredState = try decoder.decode(DashboardState.self, from: structuredPermission)
         try check(structuredState.claudeAccessibilityRequired, "structured accessibility warning")
