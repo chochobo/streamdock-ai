@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { pythonEnv } from './python-env.mjs';
 
 const exec = promisify(execFile);
 const renderer = fileURLToPath(new URL('./sound-render.py', import.meta.url));
@@ -47,7 +48,7 @@ export function createSoundController({ enabled = false, volume = 0.6,
     const promise = (async () => {
       await fs.mkdir(cacheDir, { recursive: true, mode: 0o700 });
       if (generate) await generate(name, file);
-      else await run(python, [renderer, name], { env: { ...process.env, STREAMDOCK_SOUND_DIR: cacheDir }, timeout: 60_000, maxBuffer: 8192 });
+      else await run(python, [renderer, name], { env: { ...pythonEnv(), STREAMDOCK_SOUND_DIR: cacheDir }, timeout: 60_000, maxBuffer: 8192 });
       if (!(await validWave(file))) throw new Error('Sound could not be generated');
       return file;
     })().finally(() => pending.delete(name));

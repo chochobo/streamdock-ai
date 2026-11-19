@@ -52,9 +52,18 @@ fi
 pinned_identity=""
 old_requirement=""
 if [[ -e "$destination" ]]; then
-  if [[ ! -f "$destination/Contents/Info.plist" ]] || ! /usr/bin/codesign --verify --deep --strict "$destination" >/dev/null 2>&1; then
+  if [[ ! -f "$destination/Contents/Info.plist" ]]; then
     printf '기존 앱 서명을 확인하지 못했습니다. 기존 앱은 변경하지 않았습니다.\n' >&2
     exit 1
+  fi
+  if ! /usr/bin/codesign --verify --deep --strict "$destination" >/dev/null 2>&1; then
+    # An app that ran before #43 is only accepted if nothing but Python bytecode changed.
+    verify_output="$(/usr/bin/codesign --verify --deep --strict --verbose=4 "$destination" 2>&1 || true)"
+    if ! native_only_bytecode_failed "$verify_output"; then
+      printf '기존 앱 서명을 확인하지 못했습니다. 기존 앱은 변경하지 않았습니다.\n' >&2
+      exit 1
+    fi
+    printf '기존 앱의 Python 바이트코드만 달라져 있습니다. 새로 빌드하면서 교체합니다.\n' >&2
   fi
   existing_bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$destination/Contents/Info.plist" 2>/dev/null || true)"
   if [[ "$existing_bundle_id" != 'local.streamdock.ai' ]]; then
@@ -86,6 +95,9 @@ cp "$node_bin" "$resources/runtime/node"
 cp "$workspace/package.json" "$resources/backend/package.json"
 cp -R "$workspace/src" "$resources/backend/src"
 cp -R "$workspace/scripts" "$resources/backend/scripts"
+# The workspace may hold __pycache__ from local runs. Python rewrites them when the app
+# runs, which would break the signature, so they are never part of the signed bundle (#43).
+/usr/bin/find "$resources/backend/src" "$resources/backend/scripts" \( -type d -o -type l \) -name __pycache__ -prune -exec /bin/rm -rf {} +
 cp -R "$workspace/node_modules" "$resources/backend/node_modules"
 {
   dirname "$python_bin"

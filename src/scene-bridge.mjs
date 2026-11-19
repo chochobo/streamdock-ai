@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { pythonEnv } from './python-env.mjs';
 
 const workerPath = fileURLToPath(new URL('./scene-worker.py', import.meta.url));
 const MODES = new Set(['aquarium', 'fire', 'rain', 'beach']);
@@ -40,7 +41,7 @@ export function createSceneBridge({ python = 'python3', timeoutMs = 10_000, spaw
   function ensureProcess() {
     if (closed) throw new Error('Scene engine is closed');
     if (child) return;
-    const proc = spawnProcess(python, ['-u', workerPath], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const proc = spawnProcess(python, ['-u', workerPath], { env: pythonEnv(), stdio: ['pipe', 'pipe', 'ignore'] });
     child = proc; buffer = '';
     proc.stdin.on('error', () => {});
     proc.stdout.setEncoding('utf8');
