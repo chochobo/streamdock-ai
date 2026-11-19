@@ -50,7 +50,7 @@ test('XL device emits each rocker press once, until released, without key callba
   const { device, keys, controls, emit } = mockDevice(XL);
   await device.start();
   for (const code of Object.keys(ROCKER_CODES).map(Number)) { emit(code, true); emit(code, false); }
-  assert.deepEqual(controls, Object.values(ROCKER_CODES).map(([control, action]) => ({ control, action, phase: 'down' })));
+  assert.deepEqual(controls, Object.entries(ROCKER_CODES).map(([code, [control, action]]) => ({ control, action, phase: 'down', code: Number(code) })));
   assert.deepEqual(keys, []);
   // A held rocker (repeated press reports, no release) fires once.
   controls.length = 0;

@@ -299,6 +299,7 @@ export function featureItems(mode, {machine,pomodoro,market,parcels,worktrees,us
         soundKnown
         ? item('settings-sound','효과음',soundEnabled?'켜짐':'꺼짐',soundEnabled?'누르면 효과음을 끕니다.':'누르면 효과음을 켭니다.','idle','settings:sound')
         : placeholder('settings-sound','효과음','설정값을 확인할 수 없습니다.')];
+      items.push(item('settings-keytest','키 시험','번호 확인','키마다 위치 번호·행/열·기기 슬롯을 그리고 누른 키를 표시합니다. 오른쪽 아래 키를 길게 누르면 나갑니다.','idle','settings:keytest'));
       const screen=settings?.screensaver;
       if(!screen || typeof screen.enabled!=='boolean') {
         items.push(placeholder('settings-screen','화면보호','설정값을 확인할 수 없습니다.'));
