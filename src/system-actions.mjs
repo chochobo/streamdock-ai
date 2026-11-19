@@ -96,7 +96,9 @@ export function createSystemActions({ run = execFileAsync, copy = pbcopy, platfo
   async function runCommand(item) {
     const [file, ...args] = item.command;
     try {
-      await run(file, args, { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 64 * 1024 });
+      // The backend's environment holds the native app token; a user command must not inherit it.
+      const { STREAMDOCK_NATIVE_TOKEN, ...env } = process.env;
+      await run(file, args, { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 64 * 1024, env });
       return ok('command_ran', '명령을 실행했습니다.');
     } catch (error) {
       return error?.killed === true || error?.signal === 'SIGTERM'

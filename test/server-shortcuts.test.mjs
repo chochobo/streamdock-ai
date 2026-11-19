@@ -106,6 +106,23 @@ export function createSystemActions(){return {async execute(item){appendFileSync
   assert.equal(await release('음소거'), 'ran');
   assert.deepEqual((await ran()).at(-1), { type: 'system', label: '음소거', system: 'mute' });
 
+  // The HTTP press API (any local process) never runs commands or pastes text, even with a faked hold time.
+  async function apiPress(label, heldMs) {
+    const state = await status(base);
+    const key = state.deck.keys.find(k => k.label === label && k.action !== 'none');
+    const response = await fetch(`${base}/api/press`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ index: key.index, revision: state.deck.revision, heldMs }) });
+    return { status: response.status, body: await response.json() };
+  }
+  const beforeApi = (await ran()).length;
+  for (const label of ['빌드', '계속']) {
+    const denied = await apiPress(label, 60_000);
+    assert.equal(denied.status, 409);
+    assert.equal(denied.body.code, 'device_required');
+  }
+  assert.equal((await ran()).length, beforeApi, 'no command or paste through the API');
+  assert.equal((await apiPress('터미널', 0)).status, 200, 'opening an app from the app preview still works');
+  assert.equal((await ran()).length, beforeApi + 1);
+
   // The file changes while the old keys are still on screen: stale keys do not run.
   await writeConfig({ version: 1, items: [{ label: '터미널', type: 'app', app: 'Notes' }] });
   const before = (await ran()).length;

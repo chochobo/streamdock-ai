@@ -113,6 +113,16 @@ test('an unsafe file is refused: group/world writable, symlink, other owner is n
   assert.equal((await readShortcutsConfig({ file: wrongVersion.file })).status, 'unavailable');
 });
 
+test('a FIFO in place of the file is refused without hanging', async t => {
+  const { execFileSync } = await import('node:child_process');
+  const { home } = await fixture(t);
+  const fifo = path.join(home, 'fifo.json');
+  execFileSync('/usr/bin/mkfifo', [fifo]);
+  const result = await Promise.race([readShortcutsConfig({ file: fifo }), new Promise(resolve => setTimeout(() => resolve('hung'), 3000))]);
+  assert.notEqual(result, 'hung');
+  assert.equal(result.status, 'unavailable');
+});
+
 test('an unavailable file still offers the built-in keys', async t => {
   const broken = await fixture(t, '{ not json');
   const config = await readShortcutsConfig({ file: broken.file });

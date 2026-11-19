@@ -113,6 +113,16 @@ test('commands run directly with their arguments, a timeout and no shell', async
   assert.equal(calls[0].options.shell, undefined);
 });
 
+test('a command does not inherit the native app token', async () => {
+  process.env.STREAMDOCK_NATIVE_TOKEN = 'a'.repeat(64);
+  try {
+    const { actions, calls } = harness();
+    await actions.execute({ type: 'command', label: 'b', command: ['/usr/bin/true'], hold: true });
+    assert.equal(calls[0].options.env.STREAMDOCK_NATIVE_TOKEN, undefined);
+    assert.ok(calls[0].options.env.PATH, 'the rest of the environment is kept');
+  } finally { delete process.env.STREAMDOCK_NATIVE_TOKEN; }
+});
+
 test('a failing or hanging command reports a short message without output', async () => {
   const failed = harness({ fail: () => Object.assign(new Error('Command failed'), { code: 2, stdout: 'TOKEN=abc', stderr: 'secret' }) });
   let result = await failed.actions.execute({ type: 'command', label: 'b', command: ['/bin/false'], hold: true });

@@ -29,6 +29,17 @@ test('each shortcut becomes one key bound to its id; commands look cautionary', 
   assert.ok(items.every(i => i.enabled === true && i.kind === 'feature'));
 });
 
+test('details never repeat snippet text, command arguments or link paths', () => {
+  const items = featureItems('shortcuts', { shortcuts: { status: 'ok', skipped: 0, items: [
+    user('sc-0-aaaaaaaa', { label: 'T', type: 'text', text: 'token=hunter2-secret', submit: false }),
+    user('sc-1-bbbbbbbb', { label: 'C', type: 'command', command: ['/usr/bin/curl', '-H', 'Authorization: abc123'], hold: true }),
+    user('sc-2-cccccccc', { label: 'U', type: 'url', url: 'https://example.com/private/path?token=xyz' }),
+  ] } });
+  const all = JSON.stringify(items);
+  assert.doesNotMatch(all, /hunter2|abc123|private|xyz|curl/);
+  assert.match(items[2].detail, /example\.com/);
+});
+
 test('an unconfigured or unreadable file and skipped items are named on the page', () => {
   const none = featureItems('shortcuts', { shortcuts: { status: 'unconfigured', skipped: 0, items: [] } });
   assert.deepEqual(none.map(i => i.id), ['shortcuts-setup']);
@@ -50,6 +61,15 @@ test('XL fits 26 shortcuts on a page and 293S 12; extra ones page forward', () =
     assert.equal(plan.keys.filter(k => k.kind === 'feature').length, capacity);
     assert.ok(plan.pages > 1);
   }
+});
+
+test('English mode translates the captions the app fills in for user keys, not the user words', () => {
+  const [generated, own] = translateKeys([
+    { index: 0, kind: 'feature', id: 'sc-0-aaaaaaaa', label: '터미널', caption: '앱 열기' },
+    { index: 1, kind: 'feature', id: 'sc-1-bbbbbbbb', label: '터미널', caption: '내 메모' },
+  ], 'en');
+  assert.deepEqual([generated.label, generated.caption], ['터미널', 'Open app']);
+  assert.deepEqual([own.label, own.caption], ['터미널', '내 메모']);
 });
 
 test('English mode translates built-in keys but never the user labels', () => {

@@ -95,7 +95,8 @@ function assemble(userItems, builtins, status, skipped) {
 export async function readShortcutsConfig({ home = os.homedir(), file = path.join(home, '.config', 'streamdock-ai', 'shortcuts.json') } = {}) {
   let handle;
   try {
-    handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    // O_NONBLOCK: a FIFO at this path must fail the isFile() check, not hang the open.
+    handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0));
     const stat = await handle.stat();
     const unsafeOwner = typeof process.getuid === 'function' && stat.uid !== process.getuid();
     // Commands run from this file, so nobody but the owner may be able to edit it.

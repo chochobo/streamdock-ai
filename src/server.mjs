@@ -747,11 +747,14 @@ async function leaveMode(priorMode, nextMode) {
 
 // Run one shortcut (#33). The file is re-read at press time and the item is
 // looked up by its content-bound id, so a key can only run what it showed.
-async function runShortcut(id, longPress) {
+async function runShortcut(id, longPress, fromApi) {
   shortcutsConfig = await readShortcutsConfig();
   const item = shortcutsConfig.items.find(entry => entry.id === id);
   let result;
   if (!item) result = { ok: false, code: 'stale', message: '바로가기 설정이 바뀌었습니다. 화면을 다시 열어 주세요.' };
+  // The HTTP press API can name any hold time and is open to every local process, so it
+  // never runs commands or pastes text; those need the device itself, like update/parcel confirm.
+  else if (fromApi && (item.type === 'command' || item.type === 'text')) result = { ok: false, code: 'device_required', message: '이 키는 기기에서 직접 눌러야 합니다.' };
   else if (item.hold && !longPress) result = { ok: false, code: 'hold_required', message: '이 키는 길게 눌러야 실행됩니다.' };
   else result = await systemActions.execute(item);
   feedback = result.message || '';
@@ -969,7 +972,7 @@ async function press(index, revision, heldMs = 0, inputCode = null) {
         if (!changed && device.status().mode !== 'simulator') return { ok: false, code: 'unavailable', message: '장치 밝기를 변경하지 못했습니다.' };
         await settings.update({ brightness: value });
       } else if (command.startsWith('shortcut:')) {
-        return await runShortcut(command.slice('shortcut:'.length), action.longPress === true);
+        return await runShortcut(command.slice('shortcut:'.length), action.longPress === true, revision !== undefined);
       } else if (command.startsWith('pomodoro:start:')) {
         const minutes = Number(command.slice('pomodoro:start:'.length));
         if (![5, 10, 15, 20, 25, 30, 45, 50, 60, 90].includes(minutes)) return { ok: false, code: 'invalid', message: '타이머 시간을 확인할 수 없습니다.' };

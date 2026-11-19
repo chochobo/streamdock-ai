@@ -284,10 +284,13 @@ function shortcutItems(config) {
   const list=Array.isArray(config?.items)?config.items:[];
   const items=list.filter(sc=>sc&&typeof sc.id==='string').map(sc=>{
     const caption=clean(sc.caption,24)||(sc.type==='system'?'':SHORTCUT_CAPTION[sc.type]||'');
+    // The status API serves this detail to any local caller, so it never repeats snippet
+    // text, command arguments or link paths: a snippet may hold a secret.
+    let host='';if(sc.type==='url'){try{host=new URL(sc.url).hostname;}catch{host='';}}
     const detail=sc.type==='app'?`앱 열기: ${clean(sc.app,60)}`
-      :sc.type==='url'?`링크 열기: ${clean(sc.url,60)}`
-      :sc.type==='text'?`${sc.submit?'붙여넣고 입력':'붙여넣기'}: ${clean(sc.text,50)}`
-      :sc.type==='command'?`길게 눌러 실행: ${clean(Array.isArray(sc.command)?sc.command.join(' '):'',50)}`
+      :sc.type==='url'?`링크 열기${host?`: ${clean(host,60)}`:''}`
+      :sc.type==='text'?(sc.submit?'문구를 붙여넣고 입력합니다.':'문구를 붙여넣습니다.')
+      :sc.type==='command'?'길게 눌러 명령을 실행합니다.'
       :clean(sc.label,40);
     return item(sc.id,clean(sc.label,40)||'바로가기',caption,detail,sc.type==='command'?'blocked':'idle',`shortcut:${sc.id}`);
   });
