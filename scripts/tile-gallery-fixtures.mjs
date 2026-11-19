@@ -44,6 +44,19 @@ function keyFixtures() {
     }
     add('empty', `empty ${language}`, { kind: 'empty', state: 'empty', language });
 
+    // XL 대시보드(#36): 여러 키에 걸친 그림의 조각들. 7칸이 한 줄이다
+    const cpu = Array.from({ length: 80 }, (_, i) => Math.round(30 + 25 * Math.sin(i / 6) + (i % 7) * 2));
+    const mem = Array.from({ length: 80 }, (_, i) => Math.round(58 + i * 0.08 + 3 * Math.sin(i / 11)));
+    const widgets = {
+      usage: { rows: [{ label: 'Codex 5h', used: 42, reset: '15:30' }, { label: 'Claude 5h', used: 91, reset: language === 'en' ? 'Mon 09:00' : '월 09:00' }] },
+      graph: { cpu, mem },
+      stack: { counts: { working: 3, blocked: 1, error: 0, done: 2, idle: 4 } },
+      empty: { counts: { working: 0, blocked: 0, error: 0, done: 0, idle: 0 } },
+    };
+    for (const [name, data] of Object.entries(widgets)) {
+      for (let part = 1; part <= 7; part++) add('dashboard', `dashboard ${language} ${name} ${part}`, { kind: 'wide', language, wide: { type: name === 'empty' ? 'stack' : name, part, parts: 7, ...data } });
+    }
+
     // 바로가기(#33): 사용자 라벨은 그대로, 내장 키는 번역된다
     for (const [label, caption, state] of [['터미널', '앱 열기', 'idle'], ['GitHub', '링크', 'idle'], ['계속', '문구', 'idle'], ['빌드 배포', '길게', 'blocked'], ['🚀 릴리스', '앱 열기', 'idle'], ['스트림독 AI', '프롬프트', 'idle']]) {
       add('shortcut', `shortcut ${language} ${label}`, { kind: 'feature', id: 'sc-0-aaaaaaaa', label, caption, state, language });

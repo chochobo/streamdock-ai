@@ -1,3 +1,4 @@
+import { usageRows, wideRuns } from './dashboard-widgets.mjs';
 // Pure rendering model: these helpers never contact a service or mutate state.
 const clean=(value,max=80)=>typeof value==='string'?Array.from(value.replace(/[\p{Cc}\p{Cf}]/gu,' ').trim()).slice(0,max).join(''):'';
 const finite=(value,min=-Infinity,max=Infinity)=>typeof value==='number'&&Number.isFinite(value)&&value>=min&&value<=max?value:null;
@@ -277,6 +278,31 @@ function creditItems(credits) {
   });
 }
 
+// XL dashboard (#36): three pictures drawn across rows of keys (see dashboard-widgets.mjs).
+// Items follow the page content order, so each widget's keys land on its row.
+function dashboardItems({usage,agents,history,layout}) {
+  const runs=wideRuns(layout);
+  if(!runs.length)return [placeholder('dashboard-unavailable','대시보드','이 기기에서는 쓸 수 없습니다.')];
+  const live=(Array.isArray(agents)?agents:[]).filter(a=>a&&typeof a==='object'&&!a.isSubagent&&a.presence==='live');
+  const counts={working:0,blocked:0,error:0,done:0,idle:0};
+  let unknown=0;
+  for(const a of live){if(Object.hasOwn(counts,a.status))counts[a.status]++;else unknown++;}
+  const samples=Array.isArray(history)?history:[];
+  const widgets=[
+    {type:'usage',rows:usageRows(usage),name:'사용량'},
+    {type:'graph',cpu:samples.map(s=>s?.cpu),mem:samples.map(s=>s?.mem),name:'CPU·메모리'},
+    {type:'stack',counts,unknown,name:'에이전트'},
+  ];
+  const owner=new Map();
+  runs.slice(0,widgets.length).forEach((run,i)=>run.forEach((index,part)=>owner.set(index,{widget:widgets[i],part:part+1,parts:run.length})));
+  return layout.pageContent.map(index=>{
+    const own=owner.get(index);
+    if(!own)return {id:`dash-blank-${index}`,label:'',caption:'',detail:'',state:'empty',kind:'feature',enabled:false};
+    const {name,...data}=own.widget;
+    return {id:`dash-${data.type}-${own.part}`,label:'',caption:'',detail:`대시보드: ${name}`,state:'idle',kind:'wide',enabled:false,wide:{...data,part:own.part,parts:own.parts}};
+  });
+}
+
 // User shortcuts (#33). Labels and captions are the user's own words and are
 // never translated; only the built-in system keys (ids scb-*) are.
 const SHORTCUT_CAPTION={app:'앱 열기',url:'링크',text:'문구',command:'길게'};
@@ -301,12 +327,13 @@ function shortcutItems(config) {
 }
 
 /** Produce 293S feature keys. Unknown modes and missing sources are explicit. */
-export function featureItems(mode, {machine,pomodoro,market,parcels,worktrees,usage,agents,remote,credits,settings,cleanup,shortcuts}={}) {
+export function featureItems(mode, {machine,pomodoro,market,parcels,worktrees,usage,agents,remote,credits,settings,cleanup,shortcuts,layout,machineHistory}={}) {
   switch(mode){
     case 'summary':return summaryItems({agents,usage});
     case 'machines':return machineItems(machine,cleanup);
     case 'pomodoro':return timerItems(pomodoro);
     case 'shortcuts':return shortcutItems(shortcuts);
+    case 'dashboard':return dashboardItems({usage,agents,history:machineHistory,layout});
     case 'market':return marketItems(market);
     case 'parcels':return parcelItems(parcels);
     case 'worktrees':return worktreeItems(worktrees);

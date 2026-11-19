@@ -1,4 +1,5 @@
 import { PROFILES, layoutFor } from './device-profiles.mjs';
+import { safeWide } from './dashboard-widgets.mjs';
 
 /**
  * Pure navigation for optional feature pages. Key positions come from a
@@ -26,6 +27,7 @@ export const MODE_CATALOG = Object.freeze([
   { id: 'parcels', label: '택배', detail: '배송 현황' },
   { id: 'credits', label: '크레딧', detail: '서비스 잔액' },
   { id: 'remote', label: '원격', detail: '원격 에이전트' },
+  { id: 'dashboard', label: '대시보드', detail: '사용량·머신' },
   { id: 'shortcuts', label: '바로가기', detail: '앱·링크·문구' },
   { id: 'settings', label: '설정', detail: '연결과 밝기' },
 ].map(Object.freeze));
@@ -121,7 +123,8 @@ export function createModeRouter() {
     if (!Array.isArray(items)) throw new TypeError('Items must be an array');
     const isHub = mode === 'hub';
     if (!isHub && (mode === 'projects' || mode === 'usage')) throw new Error('Project and usage views are owned by deck.mjs');
-    const source = isHub ? MODE_CATALOG.map(item => ({
+    // A mode whose availability is null is not offered at all (the dashboard on a 293S).
+    const source = isHub ? MODE_CATALOG.filter(item => availability[item.id] !== null).map(item => ({
       ...item,
       enabled: Object.hasOwn(availability, item.id) ? availability[item.id] === true : DEFAULT_AVAILABILITY[item.id] === true,
       action: 'open_mode',
@@ -154,6 +157,7 @@ export function createModeRouter() {
         caption: safeText(item.caption, 40), action: enabled ? action : 'none', disabled: !enabled,
         ...(bar ? { bar } : {}),
         ...(memory ? { memory } : {}),
+        ...(item.kind === 'wide' && safeWide(item.wide) ? { wide: safeWide(item.wide) } : {}),
       };
       if (enabled) bindings[index] = isHub ? { action, mode: id } : { action, id, command: safeText(item.action || id, 80) };
     });

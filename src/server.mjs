@@ -40,6 +40,7 @@ import { readMarketConfig } from './market-config.mjs';
 import { readShortcutsConfig } from './shortcuts-config.mjs';
 import { createSystemActions } from './system-actions.mjs';
 import { createLedSync } from './led-status.mjs';
+import { wideRuns } from './dashboard-widgets.mjs';
 import { createParcelsProvider } from './parcels.mjs';
 import { createParcelImport } from './parcel-import.mjs';
 
@@ -150,6 +151,16 @@ let globalRevision = 0;
 let globalSignature = '';
 const machineMonitor = createMachineMonitor();
 let machineSnapshot = null;
+// Recent CPU/memory samples for the dashboard graph (#36): collected only while it is open.
+let machineHistory = [];
+const MACHINE_HISTORY_MAX = 120;
+function recordMachineSample(value) {
+  const cpu = Number.isFinite(value?.cpuPercent) ? value.cpuPercent : null;
+  const memory = value?.metricStatus?.memoryUsedPercent !== 'unavailable' && Number.isFinite(value?.memoryUsedPercent) ? value.memoryUsedPercent : null;
+  if (cpu === null && memory === null) return;
+  machineHistory.push({ cpu, mem: memory });
+  if (machineHistory.length > MACHINE_HISTORY_MAX) machineHistory.shift();
+}
 let machineLastAttempt = 0;
 let machineGeneration = 0;
 let cachedAgentResult = null;
@@ -241,24 +252,30 @@ async function reloadMarketConfig() {
 
 function requestFeatureData(active, force = false) {
   const now = Date.now();
-  if (active === 'machines' && force) {
+  // The dashboard (#36) reads the same monitor, once a second, and keeps a short history.
+  const machineBacked = active === 'machines' || active === 'dashboard';
+  if (machineBacked && force) {
     // Entering the page invalidates any previous snapshot or in-flight read.
     machineGeneration++;
     machineLastAttempt = 0;
     machineSnapshot = null;
+    machineHistory = [];
   }
-  if (active === 'machines' && !machinePending && (force || now - machineLastAttempt >= 1000)) {
+  if (machineBacked && !machinePending && (force || now - machineLastAttempt >= 1000)) {
     machineLastAttempt = now;
     const generation = machineGeneration;
-    const stillViewingMachines = () => !closing && displayOwner === 'router' && router.current() === 'machines';
+    const stillViewingMachines = () => !closing && displayOwner === 'router' && router.current() === active;
     machinePending = machineMonitor.read().then(value => {
-      if (generation === machineGeneration && stillViewingMachines()) machineSnapshot = value;
+      if (generation === machineGeneration && stillViewingMachines()) {
+        machineSnapshot = value;
+        if (active === 'dashboard') recordMachineSample(value);
+      }
     }).catch(() => {
       if (generation === machineGeneration && stillViewingMachines()) machineSnapshot = { status: 'unavailable' };
     }).finally(() => {
       machinePending = undefined;
       if (!stillViewingMachines()) return;
-      if (generation !== machineGeneration) { requestFeatureData('machines'); return; }
+      if (generation !== machineGeneration) { requestFeatureData(active); return; }
       // Serialize a fast repaint after any full refresh already in flight, and
       // reuse its agent scan instead of reading all agent files every second.
       void (async () => {
@@ -629,7 +646,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
       if (displayOwner === 'router') {
         const active = router.current();
         requestFeatureData(active);
-        let items = activeFeatureItems(active, { machine: machineSnapshot, pomodoro: pomodoro.snapshot(), shortcuts: shortcutsConfig, market: marketSnapshot || { status: 'unavailable', view: marketView }, parcels: parcelsSnapshot, worktrees: worktreesSnapshot ? { ...worktreesSnapshot, review: publicReview(worktreeReview) } : null, cleanup: publicReview(cleanupState), remote: remoteSnapshot ? { ...remoteSnapshot, confirmation: remoteReview?.stage === 'review' && Date.parse(remoteReview.expiresAt || '') > Date.now() ? { id: remoteReview.id, operation: remoteReview.operation, reviewed: remoteReview.reviewed } : null } : null, credits: creditsSnapshot, usage, agents, settings: { ...settings.get(), sound: sound.status(), update: updateSnapshot, capabilities: { brightness: typeof device.setBrightness === 'function' } } });
+        let items = activeFeatureItems(active, { machine: machineSnapshot, machineHistory, layout, pomodoro: pomodoro.snapshot(), shortcuts: shortcutsConfig, market: marketSnapshot || { status: 'unavailable', view: marketView }, parcels: parcelsSnapshot, worktrees: worktreesSnapshot ? { ...worktreesSnapshot, review: publicReview(worktreeReview) } : null, cleanup: publicReview(cleanupState), remote: remoteSnapshot ? { ...remoteSnapshot, confirmation: remoteReview?.stage === 'review' && Date.parse(remoteReview.expiresAt || '') > Date.now() ? { id: remoteReview.id, operation: remoteReview.operation, reviewed: remoteReview.reviewed } : null } : null, credits: creditsSnapshot, usage, agents, settings: { ...settings.get(), sound: sound.status(), update: updateSnapshot, capabilities: { brightness: typeof device.setBrightness === 'function' } } });
         if (active === 'settings' && updateReview?.stage === 'review' && Date.parse(updateReview.expiresAt || '') > Date.now()) items = [
           { id: 'update-review', label: '업데이트', caption: `${updateReview.plan?.files?.length || 0}개 파일`, detail: '앱에서 전체 변경 내용을 확인하세요.', state: 'blocked', kind: 'feature', enabled: false },
           updateReview.reviewed
@@ -645,7 +662,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
           { id: 'parcel-cancel', label: '취소', caption: '돌아가기', detail: '배송 조회를 취소합니다.', state: 'idle', kind: 'feature', action: 'parcels:cancel' },
         ];
         const framed = (active === 'games' && gameFrame) || (active === 'scenes' && sceneFrame);
-        plan = router.planPage({ items: keyTest ? [] : items, availability: featureAvailability, layout: framed ? legacyRouterLayout() : layout });
+        plan = router.planPage({ items: keyTest ? [] : items, availability: { ...featureAvailability, dashboard: wideRuns(layout).length ? true : null }, layout: framed ? legacyRouterLayout() : layout });
         if (keyTest) {
           // Every key is intercepted by press(); the plan only names them for the preview.
           const profile = PROFILES[layout.model];
@@ -769,7 +786,7 @@ async function refreshUsage() {
 
 // Cancel whatever the feature page being left still has in flight.
 async function leaveMode(priorMode, nextMode) {
-  if (priorMode === 'machines' && nextMode !== 'machines') machineMonitor.invalidate();
+  if ((priorMode === 'machines' || priorMode === 'dashboard') && nextMode !== priorMode) { machineMonitor.invalidate(); if (priorMode === 'dashboard') machineHistory = []; }
   if (priorMode === 'market' && nextMode !== 'market') marketPortfolioConsent = false;
   if (priorMode === 'parcels' && nextMode !== 'parcels') {
     if (parcelReview?.stage === 'review') { parcelsProvider.cancelRefresh(); parcelReview = null; }
@@ -1512,7 +1529,7 @@ async function maybeStartScreensaver() {
   if ((snapshot.agents || []).some(a => !a.isSubagent && a.presence === 'live' && a.status === 'blocked')) return;
   actionBusy = true;
   try {
-    if (displayOwner === 'router' && router.current() === 'machines') machineMonitor.invalidate();
+    if (displayOwner === 'router' && ['machines', 'dashboard'].includes(router.current())) { machineMonitor.invalidate(); machineHistory = []; }
     router.openMode('scenes');
     displayOwner = 'router';
     sceneFrame = await scenes.start(option.scene);
@@ -1578,9 +1595,9 @@ const timer = setInterval(() => {
   })().finally(() => { scheduledFullRefresh = null; });
 }, interval);
 // A short scheduling tick starts at most one machine read per second and is
-// idle outside the machine page; it never launches another agent scan.
+// idle outside the machine and dashboard pages; it never launches another agent scan.
 const machineTimer = setInterval(() => {
-  if (!closing && displayOwner === 'router' && router.current() === 'machines') requestFeatureData('machines');
+  if (!closing && displayOwner === 'router' && ['machines', 'dashboard'].includes(router.current())) requestFeatureData(router.current());
 }, 250);
 const usageTimer = setInterval(refreshUsage, 60_000);
 const pomodoroTimer = setInterval(() => { void pomodoro.tick().then(() => { if (displayOwner === 'router' && router.current() === 'pomodoro') void refresh(); }).catch(() => {}); }, 1000);
