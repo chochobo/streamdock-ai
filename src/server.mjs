@@ -461,7 +461,7 @@ async function rockerAction(control, action) {
       feedback = result.message || '';
       feedbackError = !result.ok;
       await refresh(true);
-      return { ok: result.ok, code: result.ok ? 'updated' : result.code };
+      return { ok: result.ok, code: result.ok ? 'updated' : (result.code ?? 'error') };
     } finally { actionBusy = false; }
   }
   if (control === 'right' && Object.hasOwn(ROCKER_BRIGHTNESS_STEP, action)) {

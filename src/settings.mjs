@@ -5,6 +5,10 @@ import path from 'node:path';
 
 const SCENES = new Set(['aquarium', 'fire', 'rain', 'beach']);
 const RIGHT_ROCKER = ['brightness', 'volume'];
+// Sections added after the first release. A default is filled in when reading, but
+// written back only if the file already had it or the change names it, so a file
+// that never used a section stays readable by older builds (e.g. when switching branches).
+const OPTIONAL_SECTIONS = ['rockers'];
 const DEFAULTS = Object.freeze({
   version: 1,
   language: 'ko',
@@ -69,9 +73,9 @@ async function readConfig(filename) {
     let parsed;
     try { parsed = JSON.parse(bytes.toString('utf8')); } catch { throw new SettingsError('settings_invalid_json', null, null, '설정 파일이 올바른 JSON이 아닙니다. 파일은 변경되지 않았습니다.'); }
     validate(parsed);
-    return { value: { language: 'ko', rockers: copy(DEFAULTS.rockers), ...parsed, rockers: { ...DEFAULTS.rockers, ...(parsed.rockers || {}) } }, bytes };
+    return { stored: new Set(Object.keys(parsed)), value: { language: 'ko', rockers: copy(DEFAULTS.rockers), ...parsed, rockers: { ...DEFAULTS.rockers, ...(parsed.rockers || {}) } }, bytes };
   } catch (error) {
-    if (error.code === 'ENOENT') return { value: copy(DEFAULTS), bytes: null };
+    if (error.code === 'ENOENT') return { value: copy(DEFAULTS), bytes: null, stored: new Set() };
     throw error;
   } finally { await handle?.close(); }
 }
@@ -121,7 +125,9 @@ export function createSettings({ home = os.homedir(), file = path.join(home, '.c
         let handle;
         try {
           handle = await fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-          await handle.writeFile(`${JSON.stringify(next, null, 2)}\n`, 'utf8');
+          const output = { ...next };
+          for (const key of OPTIONAL_SECTIONS) if (!current.stored.has(key) && !Object.hasOwn(patch, key)) delete output[key];
+          await handle.writeFile(`${JSON.stringify(output, null, 2)}\n`, 'utf8');
           await handle.sync();
           await handle.close(); handle = undefined;
           const check = await readConfig(file);

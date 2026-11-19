@@ -132,3 +132,22 @@ test('a settings file written before the rocker setting existed still loads with
   assert.deepEqual(loaded.rockers, { right: 'brightness' });
   assert.equal((await settings.update({ brightness: 50 })).rockers.right, 'brightness');
 });
+
+test('saving another setting does not add the rocker section to a file that never had it', async t => {
+  const { file } = await fixture(t);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const original = { version: 1, language: 'ko', sound: { enabled: false }, brightness: null, screensaver: { enabled: false, idleMinutes: 15, scene: 'aquarium' } };
+  await fs.writeFile(file, JSON.stringify(original), { mode: 0o600 });
+  const settings = createSettings({ file });
+  await settings.load();
+  await settings.update({ brightness: 70 });
+  const written = JSON.parse(await fs.readFile(file, 'utf8'));
+  assert.equal(written.brightness, 70);
+  assert.equal(Object.hasOwn(written, 'rockers'), false, 'an older build must still be able to read this file');
+  assert.equal(settings.get().rockers.right, 'brightness', 'the default still applies in memory');
+  // Naming the section writes it, and it stays afterwards.
+  await settings.update({ rockers: { right: 'volume' } });
+  assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).rockers.right, 'volume');
+  await settings.update({ brightness: 80 });
+  assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).rockers.right, 'volume');
+});
