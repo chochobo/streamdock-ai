@@ -83,3 +83,25 @@ native_validate_existing_requirement() {
     return 1
   fi
 }
+
+# #43: the build used to copy the workspace's __pycache__ into the bundle, so the
+# seal covered those .pyc files, and Python rewrote them when the app ran. That
+# broke the seal ("a sealed resource is missing or invalid") and the next build
+# refused to replace the app. Input: the output of `codesign --verify --verbose=4`.
+# Succeeds only when it names at least one file and every named file is a Python
+# bytecode file under backend/**/__pycache__; any other problem still fails.
+native_only_bytecode_failed() {
+  local output="$1" line path found=0
+  while IFS= read -r line; do
+    case "$line" in
+      *': a sealed resource is missing or invalid'|'') continue ;;
+      'file missing: '*) path="${line#file missing: }" ;;
+      'file modified: '*) path="${line#file modified: }" ;;
+      'file added: '*) path="${line#file added: }" ;;
+      *) return 1 ;;
+    esac
+    [[ "$path" == */Contents/Resources/backend/*/__pycache__/*.pyc && "$path" != *'/../'* ]] || return 1
+    found=1
+  done <<< "$output"
+  [[ "$found" == 1 ]]
+}

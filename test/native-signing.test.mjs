@@ -89,3 +89,41 @@ test('an existing app pinned to a local identity keeps that identity', () => {
   assert.notEqual(check(otherDevelopment, pinnedLeaf), 0);
   assert.notEqual(check('', pinnedLeaf), 0);
 });
+
+// #43: apps built before the fix were signed with Python bytecode inside the seal, and Python
+// rewrote it while the app ran. Such an app may be replaced; any other broken seal may not.
+const bytecodeOnly = output => spawnSync('/bin/bash', ['-euc', 'source scripts/native-signing.sh; native_only_bytecode_failed "$1"', '--', output], { cwd: root, encoding: 'utf8' }).status === 0;
+const bundle = '/Users/me/streamdock-ai/build/native/StreamDockAI.app';
+const pyc = name => `${bundle}/Contents/Resources/backend/src/vendor/agentdeck/__pycache__/${name}.cpython-313.pyc`;
+
+test('a seal broken only by Python bytecode files is accepted for replacement', () => {
+  const summary = `${bundle}: a sealed resource is missing or invalid`;
+  assert.equal(bytecodeOnly([summary, `file missing: ${pyc('scenes')}`, `file missing: ${pyc('sfx')}`].join('\n')), true);
+  assert.equal(bytecodeOnly([summary, `file modified: ${pyc('clock')}`].join('\n')), true);
+  assert.equal(bytecodeOnly([summary, `file added: ${bundle}/Contents/Resources/backend/src/__pycache__/x.cpython-313.pyc`].join('\n')), true);
+  assert.equal(bytecodeOnly([summary, `file missing: ${pyc('a')}`, `file modified: ${pyc('b')}`, ''].join('\n')), true, 'a trailing newline is fine');
+});
+
+test('any other kind of seal problem still blocks the replacement', () => {
+  const summary = `${bundle}: a sealed resource is missing or invalid`;
+  assert.equal(bytecodeOnly(summary), false, 'no file named: nothing proves it is only bytecode');
+  assert.equal(bytecodeOnly(''), false);
+  assert.equal(bytecodeOnly([summary, `file modified: ${pyc('a')}`, `file modified: ${bundle}/Contents/MacOS/StreamDockAI`].join('\n')), false, 'the executable changed');
+  assert.equal(bytecodeOnly([summary, `file modified: ${bundle}/Contents/Resources/backend/src/server.mjs`].join('\n')), false, 'a source file changed');
+  assert.equal(bytecodeOnly([summary, `file modified: ${bundle}/Contents/Resources/backend/src/x.pyc`].join('\n')), false, 'a .pyc outside __pycache__');
+  assert.equal(bytecodeOnly([summary, `file modified: ${bundle}/Contents/Frameworks/__pycache__/x.pyc`].join('\n')), false, 'a cache outside backend/');
+  assert.equal(bytecodeOnly([summary, `file modified: ${bundle}/Contents/Resources/backend/../MacOS/__pycache__/x.pyc`].join('\n')), false, 'path tricks');
+  assert.equal(bytecodeOnly([summary, `file modified: ${pyc('a')}`, 'code object is not signed at all'].join('\n')), false, 'an unknown message');
+  assert.equal(bytecodeOnly(['invalid signature (code or signature have been modified)', `file modified: ${pyc('a')}`].join('\n')), false, 'a different failure');
+  assert.equal(bytecodeOnly(`${bundle}: code object is not signed at all`), false);
+});
+
+test('the build leaves __pycache__ out of the signed bundle', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const script = await readFile(new URL('../scripts/native-build.sh', import.meta.url), 'utf8');
+  const copy = script.indexOf('cp -R "$workspace/src" "$resources/backend/src"');
+  const prune = script.indexOf('-name __pycache__ -prune -exec /bin/rm -rf {} +');
+  const sign = script.indexOf('codesign --force');
+  assert.ok(copy > 0 && prune > copy, 'the cache is removed right after the sources are copied');
+  if (sign > 0) assert.ok(prune < sign, 'and before anything is signed');
+});

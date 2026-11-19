@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { pythonEnv } from './python-env.mjs';
 
 const workerPath = fileURLToPath(new URL('./game-worker.py', import.meta.url));
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -55,7 +56,7 @@ export function createGameBridge({ python = 'python3', stateDir, timeoutMs = 10_
   function start() {
     if (closed) throw new Error('Game engine is closed');
     if (child) return;
-    const env = { ...process.env };
+    const env = pythonEnv();
     if (stateDir) env.STREAMDOCK_GAME_STATE_DIR = stateDir;
     const proc = spawnProcess(python, ['-u', workerPath], { env, stdio: ['pipe', 'pipe', 'ignore'] });
     child = proc;
