@@ -37,6 +37,8 @@ import { createPomodoro } from './pomodoro.mjs';
 import { createMachineMonitor } from './machines.mjs';
 import { createMarketProvider } from './market.mjs';
 import { readMarketConfig } from './market-config.mjs';
+import { readShortcutsConfig } from './shortcuts-config.mjs';
+import { createSystemActions } from './system-actions.mjs';
 import { createParcelsProvider } from './parcels.mjs';
 import { createParcelImport } from './parcel-import.mjs';
 
@@ -69,6 +71,8 @@ const deck = createDeck();
 const router = createModeRouter();
 const pomodoro = await createPomodoro();
 let marketConfig = await readMarketConfig();
+let shortcutsConfig = await readShortcutsConfig();
+const systemActions = createSystemActions({ run: runExternal });
 let marketProvider = createMarketProvider(marketConfig);
 const parcelsProvider = createParcelsProvider();
 const parcelImporter = createParcelImport();
@@ -157,7 +161,7 @@ let parcelsSnapshot = null;
 let parcelsLastAttempt = 0;
 let parcelsPending;
 const marketViews = ['top', 'kosdaq', 'movers', 'portfolio', 'sectors', 'macro', 'indices'];
-const featureAvailability = { projects: true, history: true, usage: true, summary: true, machines: true, pomodoro: true, market: true, parcels: true, worktrees: true, games: true, scenes: true, credits: true, remote: true, settings: true };
+const featureAvailability = { projects: true, history: true, usage: true, summary: true, machines: true, pomodoro: true, shortcuts: true, market: true, parcels: true, worktrees: true, games: true, scenes: true, credits: true, remote: true, settings: true };
 const games = createGameBridge();
 const scenes = createSceneBridge();
 const sound = createSoundController();
@@ -586,7 +590,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
       if (displayOwner === 'router') {
         const active = router.current();
         requestFeatureData(active);
-        let items = activeFeatureItems(active, { machine: machineSnapshot, pomodoro: pomodoro.snapshot(), market: marketSnapshot || { status: 'unavailable', view: marketView }, parcels: parcelsSnapshot, worktrees: worktreesSnapshot ? { ...worktreesSnapshot, review: publicReview(worktreeReview) } : null, cleanup: publicReview(cleanupState), remote: remoteSnapshot ? { ...remoteSnapshot, confirmation: remoteReview?.stage === 'review' && Date.parse(remoteReview.expiresAt || '') > Date.now() ? { id: remoteReview.id, operation: remoteReview.operation, reviewed: remoteReview.reviewed } : null } : null, credits: creditsSnapshot, usage, agents, settings: { ...settings.get(), sound: sound.status(), update: updateSnapshot, capabilities: { brightness: typeof device.setBrightness === 'function' } } });
+        let items = activeFeatureItems(active, { machine: machineSnapshot, pomodoro: pomodoro.snapshot(), shortcuts: shortcutsConfig, market: marketSnapshot || { status: 'unavailable', view: marketView }, parcels: parcelsSnapshot, worktrees: worktreesSnapshot ? { ...worktreesSnapshot, review: publicReview(worktreeReview) } : null, cleanup: publicReview(cleanupState), remote: remoteSnapshot ? { ...remoteSnapshot, confirmation: remoteReview?.stage === 'review' && Date.parse(remoteReview.expiresAt || '') > Date.now() ? { id: remoteReview.id, operation: remoteReview.operation, reviewed: remoteReview.reviewed } : null } : null, credits: creditsSnapshot, usage, agents, settings: { ...settings.get(), sound: sound.status(), update: updateSnapshot, capabilities: { brightness: typeof device.setBrightness === 'function' } } });
         if (active === 'settings' && updateReview?.stage === 'review' && Date.parse(updateReview.expiresAt || '') > Date.now()) items = [
           { id: 'update-review', label: '업데이트', caption: `${updateReview.plan?.files?.length || 0}개 파일`, detail: '앱에서 전체 변경 내용을 확인하세요.', state: 'blocked', kind: 'feature', enabled: false },
           updateReview.reviewed
@@ -741,6 +745,21 @@ async function leaveMode(priorMode, nextMode) {
   }
 }
 
+// Run one shortcut (#33). The file is re-read at press time and the item is
+// looked up by its content-bound id, so a key can only run what it showed.
+async function runShortcut(id, longPress) {
+  shortcutsConfig = await readShortcutsConfig();
+  const item = shortcutsConfig.items.find(entry => entry.id === id);
+  let result;
+  if (!item) result = { ok: false, code: 'stale', message: '바로가기 설정이 바뀌었습니다. 화면을 다시 열어 주세요.' };
+  else if (item.hold && !longPress) result = { ok: false, code: 'hold_required', message: '이 키는 길게 눌러야 실행됩니다.' };
+  else result = await systemActions.execute(item);
+  feedback = result.message || '';
+  feedbackError = !result.ok;
+  await refresh(true);
+  return result;
+}
+
 // XL summary keys (#32), top to bottom: overview -> agent list, attention ->
 // the waiting session, time -> usage. The 293S side screens are not keys.
 // Repeated presses on the attention key step through the waiting sessions
@@ -853,7 +872,11 @@ async function press(index, revision, heldMs = 0, inputCode = null) {
       if (action.mode === 'projects') { deck.setScope('live'); displayOwner = 'deck'; }
       else if (action.mode === 'history') { deck.setScope('history'); displayOwner = 'deck'; }
       else if (action.mode === 'usage') { deck.openUsage(); displayOwner = 'deck'; }
-      else { displayOwner = 'router'; requestFeatureData(action.mode, true); }
+      else {
+        // Re-read the user's file whenever the page is entered, so edits show up.
+        if (action.mode === 'shortcuts') shortcutsConfig = await readShortcutsConfig();
+        displayOwner = 'router'; requestFeatureData(action.mode, true);
+      }
       feedback = '';
       feedbackError = false;
       await refresh(true);
@@ -945,6 +968,8 @@ async function press(index, revision, heldMs = 0, inputCode = null) {
         const changed = await device.setBrightness(value);
         if (!changed && device.status().mode !== 'simulator') return { ok: false, code: 'unavailable', message: '장치 밝기를 변경하지 못했습니다.' };
         await settings.update({ brightness: value });
+      } else if (command.startsWith('shortcut:')) {
+        return await runShortcut(command.slice('shortcut:'.length), action.longPress === true);
       } else if (command.startsWith('pomodoro:start:')) {
         const minutes = Number(command.slice('pomodoro:start:'.length));
         if (![5, 10, 15, 20, 25, 30, 45, 50, 60, 90].includes(minutes)) return { ok: false, code: 'invalid', message: '타이머 시간을 확인할 수 없습니다.' };

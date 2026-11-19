@@ -52,10 +52,11 @@ test('hub lists all modes over pages, while unavailable modes cannot be selected
   assert.equal(router.press(14, { revision: first.revision }).type, 'busy');
   const second = publish(router, { availability: enabled });
   assert.equal(second.keys[0].label, '원격');
-  assert.equal(second.keys[1].label, '설정');
+  assert.equal(second.keys[1].label, '바로가기');
+  assert.equal(second.keys[2].label, '설정');
   assert.notEqual(second.revision, first.revision);
-  assert.equal(router.press(1, { revision: first.revision }).type, 'stale');
-  assert.deepEqual(router.press(1, { revision: second.revision }), { type: 'open', mode: 'settings' });
+  assert.equal(router.press(2, { revision: first.revision }).type, 'stale');
+  assert.deepEqual(router.press(2, { revision: second.revision }), { type: 'open', mode: 'settings' });
   assert.equal(router.current(), 'settings');
 });
 

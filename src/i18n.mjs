@@ -1,6 +1,6 @@
 // Only translate app-owned text. External names and free-form details remain intact.
 const words = Object.freeze({
-  '기능':'Features','열림':'Open','사용량':'Usage','이전':'Prev','다음':'Next','뒤로':'Back',
+  '기능':'Features','바로가기':'Shortcuts','볼륨 +':'Vol +','볼륨 −':'Vol −','음소거':'Mute','화면끄기':'Screen off','보호기':'Saver','올리기':'Up','내리기':'Down','전환':'Toggle','절전':'Sleep','바로가기 설정':'Shortcut setup','설정 파일 확인':'Check file','건너뜀':'Skipped','열림':'Open','사용량':'Usage','이전':'Prev','다음':'Next','뒤로':'Back',
   '요약':'Summary','에이전트':'Agents','기록':'History','머신':'Machine','타이머':'Timer',
   '주식':'Market','게임':'Games','장면':'Scenes','워크트리':'Worktrees','택배':'Parcels',
   '크레딧':'Credits','원격':'Remote','설정':'Settings','메모리':'Memory','메모리 사용':'Memory Used','디스크':'Disk',
@@ -40,8 +40,8 @@ const words = Object.freeze({
 
 // Keys which can contain names from accounts, quotes, paths, parcels, or hosts
 // are never included in this allowlist, even if the name matches a UI word.
-const systemLabelId = /^(?:machine-(?:unavailable|drive-status|cpu|memory|disk|network|battery|temp|health)|timer-(?:unavailable|current|start-\d+|pause|resume|reset)|settings-[\w-]+|game-[\w-]+|scene-[\w-]+|market-(?:view|refresh|heat|source|unavailable|empty|consent-(?:info|cancel|frequency|confirm|invalid))|parcels-[\w-]+|parcel-(?:review|wait|confirm|cancel)|update-(?:review|wait|apply|cancel)|worktrees-empty|worktree-(?:review-scope|confirm|web-review|cancel|reason-\d+)|cleanup-(?:clean|purge|trash|review-scope|review-count|review-size|confirm|web-review|cancel|more|reason-\d+)|summary-(?:working|blocked|done|unknown|recommendation)|credits-unavailable|remote-(?:unconfigured|no-operations|cancel|web-review|confirm)|feature-unavailable)$/;
-const generatedCaptionId = /^(?:machine-|timer-|settings-|game-|scene-|market-(?!quote-)|parcels-|parcel-(?:\d+$|review|wait|confirm|cancel)|update-(?:review|wait|apply|cancel)|worktree-|worktrees-|cleanup-|summary-(?!recommendation$)|credit-|credits-|remote-|feature-)/;
+const systemLabelId = /^(?:machine-(?:unavailable|drive-status|cpu|memory|disk|network|battery|temp|health)|timer-(?:unavailable|current|start-\d+|pause|resume|reset)|settings-[\w-]+|game-[\w-]+|scene-[\w-]+|market-(?:view|refresh|heat|source|unavailable|empty|consent-(?:info|cancel|frequency|confirm|invalid))|parcels-[\w-]+|parcel-(?:review|wait|confirm|cancel)|update-(?:review|wait|apply|cancel)|worktrees-empty|worktree-(?:review-scope|confirm|web-review|cancel|reason-\d+)|cleanup-(?:clean|purge|trash|review-scope|review-count|review-size|confirm|web-review|cancel|more|reason-\d+)|summary-(?:working|blocked|done|unknown|recommendation)|credits-unavailable|remote-(?:unconfigured|no-operations|cancel|web-review|confirm)|scb-[\w-]+|shortcuts-[\w-]+|feature-unavailable)$/;
+const generatedCaptionId = /^(?:machine-|timer-|settings-|game-|scene-|market-(?!quote-)|parcels-|parcel-(?:\d+$|review|wait|confirm|cancel)|update-(?:review|wait|apply|cancel)|worktree-|worktrees-|cleanup-|summary-(?!recommendation$)|credit-|credits-|remote-|scb-|shortcuts-|feature-)/;
 const dynamic = text => {
   let m;
   if ((m = /^(\d+)분$/.exec(text))) return `${m[1]} min`;
