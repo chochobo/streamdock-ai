@@ -97,7 +97,7 @@ cp -R "$workspace/src" "$resources/backend/src"
 cp -R "$workspace/scripts" "$resources/backend/scripts"
 # The workspace may hold __pycache__ from local runs. Python rewrites them when the app
 # runs, which would break the signature, so they are never part of the signed bundle (#43).
-/usr/bin/find "$resources/backend/src" "$resources/backend/scripts" -type d -name __pycache__ -prune -exec /bin/rm -rf {} +
+/usr/bin/find "$resources/backend/src" "$resources/backend/scripts" \( -type d -o -type l \) -name __pycache__ -prune -exec /bin/rm -rf {} +
 cp -R "$workspace/node_modules" "$resources/backend/node_modules"
 {
   dirname "$python_bin"

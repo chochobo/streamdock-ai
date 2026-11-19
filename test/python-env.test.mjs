@@ -12,16 +12,30 @@ import { createSoundController } from '../src/sound.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
-test('Python bytecode goes to a user cache, never next to the (signed) sources (#43)', () => {
-  const env = pythonEnv({ PATH: '/usr/bin', KEEP: '1' }, '/Users/example');
-  assert.equal(env.PYTHONPYCACHEPREFIX, '/Users/example/.cache/streamdock-ai/pycache');
+test('Python bytecode goes to a user cache, never next to the (signed) sources (#43)', async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'streamdock-pyenv-home-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const env = pythonEnv({ PATH: '/usr/bin', KEEP: '1' }, home);
+  assert.equal(env.PYTHONPYCACHEPREFIX, path.join(home, '.cache', 'streamdock-ai', 'pycache'));
   assert.equal(env.PATH, '/usr/bin');
   assert.equal(env.KEEP, '1');
-  assert.equal(pythonEnv({ PYTHONPYCACHEPREFIX: '/custom' }, '/Users/example').PYTHONPYCACHEPREFIX, '/custom', 'an explicit choice is kept');
+  assert.equal(pythonEnv({ PYTHONPYCACHEPREFIX: '/custom' }, home).PYTHONPYCACHEPREFIX, '/custom', 'an explicit choice is kept');
   const base = { A: '1' };
-  pythonEnv(base, '/h');
+  pythonEnv(base, home);
   assert.deepEqual(base, { A: '1' }, 'the input is not modified');
-  assert.equal(pythonEnv(undefined, '/h').PYTHONPYCACHEPREFIX, '/h/.cache/streamdock-ai/pycache');
+  assert.equal(pythonEnv(undefined, home).PYTHONPYCACHEPREFIX, path.join(home, '.cache', 'streamdock-ai', 'pycache'));
+});
+
+test('the cache directory is created private to the user', async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'streamdock-pyenv-mode-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const previous = process.umask(0);
+  try {
+    const { PYTHONPYCACHEPREFIX } = pythonEnv({}, home);
+    assert.equal((await stat(PYTHONPYCACHEPREFIX)).mode & 0o777, 0o700, 'not group- or world-accessible even with umask 0');
+  } finally { process.umask(previous); }
+  // An unwritable location does not make the environment fail; Python then decides for itself.
+  assert.doesNotThrow(() => pythonEnv({}, '/dev/null/not-a-directory'));
 });
 
 async function capture(factory) {

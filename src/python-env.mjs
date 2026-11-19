@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -13,6 +14,10 @@ import path from 'node:path';
  */
 export function pythonEnv(base = process.env, home = os.homedir()) {
   const env = { ...base };
-  if (!env.PYTHONPYCACHEPREFIX) env.PYTHONPYCACHEPREFIX = path.join(home, '.cache', 'streamdock-ai', 'pycache');
+  if (!env.PYTHONPYCACHEPREFIX) {
+    env.PYTHONPYCACHEPREFIX = path.join(home, '.cache', 'streamdock-ai', 'pycache');
+    // Python would create it with the umask's mode; keep other users out of code it will load.
+    try { mkdirSync(env.PYTHONPYCACHEPREFIX, { recursive: true, mode: 0o700 }); } catch { /* Python creates it if this fails. */ }
+  }
   return env;
 }
