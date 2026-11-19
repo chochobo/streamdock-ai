@@ -1,0 +1,32 @@
+{
+  "device": {
+    "connected": false,
+    "model": "Stream Dock XL (5548:1028)",
+    "mode": "hardware",
+    "error": "open failed: /Users/alice/Library/streamdock/hid.sock token=fixtureTokenABCDEFGHIJKLMNOPQRSTUVWXYZ0123",
+    "lastDeviceAcknowledgementAt": "2026-11-19T10:00:07.000Z",
+    "lastTransportHeartbeatAt": "2026-11-19T10:00:09.500Z"
+  },
+  "connection": {
+    "reconnecting": false,
+    "nextAttemptAt": "2026-11-19T10:00:15.000Z",
+    "consecutiveFailures": 3,
+    "lastError": "장치를 열지 못했습니다."
+  },
+  "lastInput": { "index": 7, "code": "ok", "at": "2026-11-19T10:00:05.000Z" },
+  "agents": [
+    { "id": "fixture-secret-agent", "name": "agent", "title": "SECRET-SESSION-TITLE-ZETA", "project": "secret-project-omega", "provider": "codex", "status": "working" }
+  ],
+  "usage": {
+    "accounts": [ { "id": "acct-1", "provider": "claude", "label": "alice@example.com", "status": "ok" } ],
+    "warnings": []
+  },
+  "deck": {
+    "revision": 3,
+    "keys": [],
+    "layout": { "model": "xl", "name": "Stream Dock XL", "cols": 8, "rows": 4, "keyCount": 32, "sideSlots": [], "summaryKeys": [7, 15, 23] }
+  },
+  "settingsError": { "code": "settings_invalid_value", "field": "brightness", "allowed": { "min": 0, "max": 100 }, "message": "brightness 값은 null 또는 0에서 100 사이의 정수여야 합니다." },
+  "warnings": ["설정을 읽지 못했습니다.", "상태를 갱신하지 못했습니다: ENOENT /Users/alice/.codex/sessions/secret-project-omega.jsonl", "Codex 사용량을 확인할 수 없습니다."],
+  "updatedAt": "2026-11-19T10:00:09.000Z"
+}
