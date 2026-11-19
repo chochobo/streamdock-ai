@@ -320,6 +320,8 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
   let profile = initialProfile;
   let state = { connected: false, model: mode === 'simulator' ? 'Simulator' : modelName(profile, profile.vendorId, profile.productIds[0]), error: null, mode };
   let handle, sharp, heartbeat, starting;
+  // Counts successful connections; the LED sync re-applies its state after a reconnect.
+  let epoch = 0;
   let queue = Promise.resolve();
   const sent = new Map();
   const sentSummary = new Map();
@@ -465,6 +467,7 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
         sent.clear();
         sentSummary.clear();
         state = { ...state, connected: true, error: null };
+        epoch++;
         heartbeat = setInterval(() => {
           const task = queue.then(async () => {
             await send(commandPacket([...Buffer.from('CONNECT')]));
@@ -501,19 +504,23 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
       if (mode !== 'hardware' || !handle || profile.ledCount < 1 || !state.connected) return false;
       // The color first, then the brightness: the old color never shows at the new level.
       const packets = [...(rgb === null ? [] : ledPackets.color(rgb, profile.ledCount)), ...ledPackets.brightness(brightness)];
+      // An LED write that fails is not a lost connection: keys keep working, and a real
+      // disconnect is noticed by the next render or heartbeat.
       const task = queue.then(async () => { for (const packet of packets) await send(packet); });
-      queue = task.catch(error => { fail(error); });
-      await queue;
+      queue = task.catch(() => {});
+      try { await task; } catch { return false; }
       return state.connected;
     },
     /** Give the LEDs back to the device's own effect. */
     async resetLeds() {
       if (mode !== 'hardware' || !handle || profile.ledCount < 1 || !state.connected) return false;
       const task = queue.then(async () => { for (const packet of ledPackets.reset()) await send(packet); });
-      queue = task.catch(error => { fail(error); });
-      await queue;
+      queue = task.catch(() => {});
+      try { await task; } catch { return false; }
       return state.connected;
     },
+    /** Changes on every successful (re)connection. */
+    connectionEpoch() { return epoch; },
     async render(keys) {
       if (mode !== 'hardware' || !handle) return false;
       const task = queue.then(async () => {

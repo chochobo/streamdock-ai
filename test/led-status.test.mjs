@@ -93,3 +93,21 @@ test('shutdown restores the default effect only if the LEDs were changed', async
   await used.sync.shutdown();
   assert.deepEqual(used.calls.map(c => c[0]), ['set', 'reset']);
 });
+
+test('a reconnect the sync never saw as disconnected still re-applies the state (new epoch)', async () => {
+  const { calls, sync } = harness();
+  await sync.sync(on([agent('error')], { epoch: 1 }));
+  assert.equal(await sync.sync(on([agent('error')], { epoch: 1 })), 'unchanged');
+  assert.equal(await sync.sync(on([agent('error')], { epoch: 2 })), 'set');
+  assert.equal(calls.length, 2);
+});
+
+test('a device that keeps refusing a state is not asked again until the state changes', async () => {
+  const calls = [];
+  const sync = createLedSync({ setLeds: async value => { calls.push(value); return false; }, resetLeds: async () => true, maxFailures: 3 });
+  for (let i = 0; i < 6; i++) await sync.sync(on([agent('error')]));
+  assert.equal(calls.length, 3, 'three attempts, then it stops asking');
+  assert.equal(await sync.sync(on([agent('error')])), 'failed');
+  await sync.sync(on([agent('working')]));
+  assert.equal(calls.length, 4, 'a different state is tried');
+});

@@ -92,3 +92,31 @@ test('a 293S, a simulator and a stopped device send nothing and say so', async (
   const stopped = mockDevice();
   assert.equal(await stopped.device.setLeds({ rgb: [1, 2, 3], brightness: 30 }), false);
 });
+
+test('a failed LED write is not a lost connection: keys keep their link and the call reports false', async () => {
+  const writes = [];
+  let failLed = true;
+  class FakeHid extends EventEmitter {
+    write(data) {
+      const name = Buffer.from(data).subarray(6, 11).toString('ascii');
+      if (failLed && ['LBLIG', 'SETLB', 'DELED'].includes(name)) throw new Error('write refused');
+      writes.push(Buffer.from(data)); return data.length;
+    }
+    close() {}
+  }
+  const hid = { HID: FakeHid, devicesAsync: async () => [XL] };
+  const device = createDevice({ mode: 'hardware', dependencies: { skipInitialBlank: true, hid, sharp, officialAppRunning: async () => false } });
+  await device.start();
+  assert.equal(await device.setLeds({ rgb: [1, 2, 3], brightness: 30 }), false);
+  assert.equal(await device.resetLeds(), false);
+  assert.equal(device.status().connected, true, 'the connection is untouched');
+  failLed = false;
+  assert.equal(await device.setLeds({ rgb: [1, 2, 3], brightness: 30 }), true, 'later writes still work');
+});
+
+test('the connection epoch changes with every successful start', async () => {
+  const { device } = mockDevice();
+  assert.equal(device.connectionEpoch(), 0);
+  await device.start();
+  assert.equal(device.connectionEpoch(), 1);
+});

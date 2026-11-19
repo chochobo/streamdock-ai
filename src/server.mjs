@@ -567,17 +567,21 @@ function activeFeatureItems(active, data) {
   return featureItems(active, data);
 }
 
+// A stuck LED write must not hold up a refresh or shutdown; the write itself is not cancelled.
+const LED_TIMEOUT_MS = 3000;
+const within = (promise, ms) => Promise.race([promise, new Promise(resolve => { const timer = setTimeout(resolve, ms); timer.unref?.(); })]);
 async function syncLeds(agents) {
   try {
     const led = settings.get().led;
-    await ledSync.sync({
+    await within(ledSync.sync({
       enabled: led?.enabled === true,
       supported: typeof device.setLeds === 'function' && (PROFILES[layout.model]?.ledCount ?? 0) > 0,
       connected: device.status().connected === true && layoutCurrent(),
       agents,
       brightness: Number.isInteger(led?.brightness) ? led.brightness : 30,
-    });
-  } catch { /* A failed LED write never stops a refresh. */ }
+      epoch: typeof device.connectionEpoch === 'function' ? device.connectionEpoch() : 0,
+    }), LED_TIMEOUT_MS);
+  } catch { /* A failed or stuck LED write never stops a refresh. */ }
 }
 
 async function refresh(force = false, useCachedAgents = false, reconnectRender = false) {
@@ -1603,7 +1607,7 @@ async function shutdown() {
   await Promise.allSettled([games.close(), scenes.close()]);
   sound.close();
   // Give the LEDs back to the device's own effect before the connection closes.
-  await ledSync.shutdown().catch(() => {});
+  await within(ledSync.shutdown().catch(() => {}), LED_TIMEOUT_MS);
   await device.stop();
 }
 process.on('SIGINT', shutdown);

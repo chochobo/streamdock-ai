@@ -30,11 +30,16 @@ export function ledTarget(state, brightness) {
  * restores the device's own effect once. A reconnect forgets what was sent so
  * the current state is applied again.
  */
-export function createLedSync({ setLeds, resetLeds }) {
+export function createLedSync({ setLeds, resetLeds, maxFailures = 3 }) {
   let lastKey = null;
+  let lastEpoch = null;
+  let failedKey = null;
+  let failures = 0;
   return {
-    async sync({ enabled, supported, connected, agents, brightness }) {
+    async sync({ enabled, supported, connected, agents, brightness, epoch = 0 }) {
       if (!supported || !connected) { lastKey = null; return 'skipped'; }
+      // A new connection starts with the device's own effect: apply the state again.
+      if (epoch !== lastEpoch) { lastEpoch = epoch; lastKey = null; failedKey = null; failures = 0; }
       if (!enabled) {
         if (lastKey === null) return 'idle';
         lastKey = null;
@@ -43,9 +48,17 @@ export function createLedSync({ setLeds, resetLeds }) {
       }
       const target = ledTarget(ledStateFor(agents), brightness);
       if (target.key === lastKey) return 'unchanged';
+      // A device that keeps refusing a state is not asked again until the state changes.
+      if (target.key === failedKey && failures >= maxFailures) return 'failed';
       const ok = await setLeds({ rgb: target.rgb, brightness: target.brightness });
-      if (!ok) return 'failed';
+      if (!ok) {
+        failures = target.key === failedKey ? failures + 1 : 1;
+        failedKey = target.key;
+        return 'failed';
+      }
       lastKey = target.key;
+      failedKey = null;
+      failures = 0;
       return 'set';
     },
     async shutdown() {
