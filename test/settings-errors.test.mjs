@@ -38,7 +38,7 @@ test('unknown fields name the field and list the allowed ones', () => {
   const top = thrown(() => validateSettingsPatch({ 'sk-secret-key': true }));
   assert.equal(top.code, 'settings_unknown_field');
   assert.equal(top.field, 'sk-secret-key');
-  assert.deepEqual(top.allowed, ['version', 'language', 'sound', 'brightness', 'screensaver', 'rockers']);
+  assert.deepEqual(top.allowed, ['version', 'language', 'sound', 'brightness', 'screensaver', 'rockers', 'led']);
   const nested = thrown(() => validateSettingsPatch({ screensaver: { color: 'red' } }));
   assert.equal(nested.code, 'settings_unknown_field');
   assert.equal(nested.field, 'screensaver.color');

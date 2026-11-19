@@ -16,7 +16,7 @@ test('defaults are inert, isolated copies, and do not create a file', async t =>
   const settings = createSettings({ file });
   const initial = await settings.load();
   assert.deepEqual(initial, { version: 1, language: 'ko', sound: { enabled: false }, brightness: null,
-    screensaver: { enabled: false, idleMinutes: 15, scene: 'aquarium' }, rockers: { right: 'brightness' } });
+    screensaver: { enabled: false, idleMinutes: 15, scene: 'aquarium' }, rockers: { right: 'brightness' }, led: { enabled: false, brightness: 30 } });
   initial.sound.enabled = true;
   initial.screensaver.enabled = true;
   assert.equal(settings.get().sound.enabled, false);
@@ -150,4 +150,41 @@ test('saving another setting does not add the rocker section to a file that neve
   assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).rockers.right, 'volume');
   await settings.update({ brightness: 80 });
   assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).rockers.right, 'volume');
+});
+
+test('the LED setting is off by default, persists, and rejects bad values (#35)', async t => {
+  const { file } = await fixture(t);
+  const settings = createSettings({ file });
+  assert.deepEqual((await settings.load()).led, { enabled: false, brightness: 30 });
+  assert.deepEqual((await settings.update({ led: { enabled: true } })).led, { enabled: true, brightness: 30 });
+  assert.deepEqual((await settings.update({ led: { brightness: 80 } })).led, { enabled: true, brightness: 80 });
+  assert.deepEqual((await createSettings({ file }).load()).led, { enabled: true, brightness: 80 });
+  const before = await fs.readFile(file);
+  for (const patch of [{ led: { enabled: 1 } }, { led: { brightness: 0 } }, { led: { brightness: 101 } }, { led: { brightness: 30.5 } }, { led: { color: 'red' } }, { led: true }, { led: null }]) {
+    await assert.rejects(settings.update(patch), error => error instanceof SettingsError);
+  }
+  assert.deepEqual(await fs.readFile(file), before);
+});
+
+test('a settings file from before the LED setting existed loads with it off', async t => {
+  const { file } = await fixture(t);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify({ version: 1, language: 'ko', sound: { enabled: false }, brightness: null, screensaver: { enabled: false, idleMinutes: 15, scene: 'aquarium' }, rockers: { right: 'volume' } }), { mode: 0o600 });
+  const loaded = await createSettings({ file }).load();
+  assert.deepEqual(loaded.led, { enabled: false, brightness: 30 });
+  assert.equal(loaded.rockers.right, 'volume');
+});
+
+test('saving another setting does not add the LED section to a file that never had it', async t => {
+  const { file } = await fixture(t);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify({ version: 1, language: 'ko', sound: { enabled: false }, brightness: null, screensaver: { enabled: false, idleMinutes: 15, scene: 'aquarium' } }), { mode: 0o600 });
+  const settings = createSettings({ file });
+  await settings.load();
+  await settings.update({ brightness: 70 });
+  const written = JSON.parse(await fs.readFile(file, 'utf8'));
+  assert.equal(Object.hasOwn(written, 'led'), false);
+  assert.equal(Object.hasOwn(written, 'rockers'), false);
+  await settings.update({ led: { enabled: true } });
+  assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')).led, { enabled: true, brightness: 30 });
 });

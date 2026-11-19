@@ -39,6 +39,7 @@ import { createMarketProvider } from './market.mjs';
 import { readMarketConfig } from './market-config.mjs';
 import { readShortcutsConfig } from './shortcuts-config.mjs';
 import { createSystemActions } from './system-actions.mjs';
+import { createLedSync } from './led-status.mjs';
 import { createParcelsProvider } from './parcels.mjs';
 import { createParcelImport } from './parcel-import.mjs';
 
@@ -73,6 +74,8 @@ const pomodoro = await createPomodoro();
 let marketConfig = await readMarketConfig();
 let shortcutsConfig = await readShortcutsConfig();
 const systemActions = createSystemActions({ run: runExternal });
+// XL LEDs as a status light (#35): off unless settings.led.enabled.
+const ledSync = createLedSync({ setLeds: value => device.setLeds(value), resetLeds: () => device.resetLeds() });
 let marketProvider = createMarketProvider(marketConfig);
 const parcelsProvider = createParcelsProvider();
 const parcelImporter = createParcelImport();
@@ -564,6 +567,19 @@ function activeFeatureItems(active, data) {
   return featureItems(active, data);
 }
 
+async function syncLeds(agents) {
+  try {
+    const led = settings.get().led;
+    await ledSync.sync({
+      enabled: led?.enabled === true,
+      supported: typeof device.setLeds === 'function' && (PROFILES[layout.model]?.ledCount ?? 0) > 0,
+      connected: device.status().connected === true && layoutCurrent(),
+      agents,
+      brightness: Number.isInteger(led?.brightness) ? led.brightness : 30,
+    });
+  } catch { /* A failed LED write never stops a refresh. */ }
+}
+
 async function refresh(force = false, useCachedAgents = false, reconnectRender = false) {
   if (reconnecting && !reconnectRender) {
     await reconnectPending;
@@ -585,6 +601,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
         detail: [a.provider, a.displayName ? a.project : null, a.stale ? '오래된 상태' : null].filter(Boolean).join(' · '),
       }));
       alerts.update(agents);
+      await syncLeds(agents);
       if (autoScene && sceneFrame && agents.some(a => !a.isSubagent && a.presence === 'live' && a.status === 'blocked')) {
         await scenes.stop();
         sceneFrame = null;
@@ -1585,6 +1602,8 @@ async function shutdown() {
   await pomodoro.stop();
   await Promise.allSettled([games.close(), scenes.close()]);
   sound.close();
+  // Give the LEDs back to the device's own effect before the connection closes.
+  await ledSync.shutdown().catch(() => {});
   await device.stop();
 }
 process.on('SIGINT', shutdown);
