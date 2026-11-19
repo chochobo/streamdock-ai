@@ -83,7 +83,11 @@ const device = deviceFactory({ mode, profile: initialProfile, onKeyEvent: (index
     if (action === 'up' && Number.isInteger(index) && index >= 0 && index < layout.keyCount) handlePhysicalPress(index, heldMs, code);
     return;
   }
-  // Summary keys have no action; scenes and games only use the legacy area.
+  // Summary keys act on release (#32); scenes and games only use the legacy area.
+  if (Number.isInteger(index) && layout.summaryKeys.includes(index) && !legacyFrameActive()) {
+    if (action === 'up') handlePhysicalPress(index, heldMs);
+    return;
+  }
   if (!Number.isInteger(index) || index < 0 || index >= layout.keyCount || layout.summaryKeys.includes(index) ||
       (legacyFrameActive() && !layout.legacy.keys.includes(index))) { immediateKeys.delete(index); return; }
   const sceneExitKey = layout.legacy.keys[14];
@@ -720,6 +724,61 @@ async function refreshUsage() {
   return result;
 }
 
+// Cancel whatever the feature page being left still has in flight.
+async function leaveMode(priorMode, nextMode) {
+  if (priorMode === 'machines' && nextMode !== 'machines') machineMonitor.invalidate();
+  if (priorMode === 'market' && nextMode !== 'market') marketPortfolioConsent = false;
+  if (priorMode === 'parcels' && nextMode !== 'parcels') {
+    if (parcelReview?.stage === 'review') { parcelsProvider.cancelRefresh(); parcelReview = null; }
+    if (parcelImportPending || parcelImportReview?.stage === 'review') { parcelImporter.cancel(); parcelImportReview = null; }
+  }
+  if (priorMode === 'remote' && nextMode !== 'remote' && remoteReview?.stage === 'review') { remoteProvider.cancel(); remoteReview = null; }
+  if (priorMode === 'scenes' && nextMode !== 'scenes' && sceneFrame) {
+    await scenes.stop(); sceneFrame = null; sound.stopAmbient();
+  }
+  if (priorMode === 'games' && nextMode !== 'games' && gameFrame) {
+    await games.menu(); gameFrame = null;
+  }
+}
+
+// XL summary keys (#32), top to bottom: overview -> agent list, attention ->
+// the waiting session, time -> usage. The 293S side screens are not keys.
+// Repeated presses on the attention key step through the waiting sessions
+// (then failed ones) in the order the summary lists them.
+let lastAttentionId = null;
+function nextAttentionSession() {
+  for (const status of ['blocked', 'error']) {
+    const queue = (snapshot.agents || []).filter(a => !a.isSubagent && a.presence === 'live' && a.status === status && typeof a.id === 'string' && a.id);
+    if (!queue.length) continue;
+    const at = queue.findIndex(a => a.id === lastAttentionId);
+    return queue[(at + 1) % queue.length];
+  }
+  return null;
+}
+async function summaryKeyPress(slot) {
+  if (slot === 1) {
+    const session = nextAttentionSession();
+    if (session) {
+      lastAttentionId = session.id;
+      const result = await focusSession(targets.get(session.id));
+      if (result.ok) alerts.acknowledge(session.id);
+      feedback = result.message || (result.ok ? '열기 요청을 보냈습니다.' : '세션을 열지 못했습니다.');
+      feedbackError = !result.ok;
+      await refresh(true);
+      return result;
+    }
+  }
+  const next = slot === 2 ? 'usage' : 'projects';
+  await leaveMode(committedOwner === 'router' ? router.current() : null, next);
+  router.openMode(next);
+  if (next === 'usage') deck.openUsage(); else deck.setScope('live');
+  displayOwner = 'deck';
+  feedback = '';
+  feedbackError = false;
+  await refresh(true);
+  return { ok: true, code: 'navigated' };
+}
+
 async function press(index, revision, heldMs = 0, inputCode = null) {
   if (!Number.isInteger(index) || index < 0 || index >= layout.keyCount) return { ok: false, code: 'invalid', message: '버튼 번호가 올바르지 않습니다.' };
   if (actionBusy || reconnecting) return { ok: false, code: 'busy', message: '화면을 갱신 중입니다. 다시 눌러 주세요.' };
@@ -755,6 +814,10 @@ async function press(index, revision, heldMs = 0, inputCode = null) {
       await refresh(true);
       return { ok: true, code: 'updated' };
     }
+    if (layout.summaryKeys.includes(index)) {
+      if (legacyFrameActive()) return { ok: false, code: 'ignored', message: '이 버튼에는 동작이 없습니다.' };
+      return await summaryKeyPress(layout.summaryKeys.indexOf(index));
+    }
     // Scene input uses 293S legacy tile numbers; keys outside the area do nothing.
     const sceneIndex = layout.legacy.keys.indexOf(index);
     if (committedOwner === 'router' && router.current() === 'scenes' && sceneFrame && (revision === undefined || (sceneIndex >= 0 && sceneIndex < 12))) {
@@ -786,19 +849,7 @@ async function press(index, revision, heldMs = 0, inputCode = null) {
       return { ok: true, code: 'navigated' };
     }
     if (action.type === 'open') {
-      if (priorMode === 'machines' && action.mode !== 'machines') machineMonitor.invalidate();
-      if (priorMode === 'market' && action.mode !== 'market') marketPortfolioConsent = false;
-      if (priorMode === 'parcels' && action.mode !== 'parcels') {
-        if (parcelReview?.stage === 'review') { parcelsProvider.cancelRefresh(); parcelReview = null; }
-        if (parcelImportPending || parcelImportReview?.stage === 'review') { parcelImporter.cancel(); parcelImportReview = null; }
-      }
-      if (priorMode === 'remote' && action.mode !== 'remote' && remoteReview?.stage === 'review') { remoteProvider.cancel(); remoteReview = null; }
-      if (priorMode === 'scenes' && action.mode !== 'scenes' && sceneFrame) {
-        await scenes.stop(); sceneFrame = null; sound.stopAmbient();
-      }
-      if (priorMode === 'games' && action.mode !== 'games' && gameFrame) {
-        await games.menu(); gameFrame = null;
-      }
+      await leaveMode(priorMode, action.mode);
       if (action.mode === 'projects') { deck.setScope('live'); displayOwner = 'deck'; }
       else if (action.mode === 'history') { deck.setScope('history'); displayOwner = 'deck'; }
       else if (action.mode === 'usage') { deck.openUsage(); displayOwner = 'deck'; }
