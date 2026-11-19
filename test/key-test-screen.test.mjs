@@ -186,6 +186,19 @@ export async function resolve(s,c,n){if(s==='node-hid')return {url:hid,shortCirc
     assert.equal(exited.keyTest, null);
     const back = await until(() => status(base), s => s.deck?.mode === 'settings' && s.deck.keys.some(k => k.label === '키 시험'));
     assert.equal(back.keyTest, null);
+    // The app has no hold gesture: an app press on the exit key leaves; on any other key it is a test press.
+    await click(base, deck => deck.keys.find(k => k.label === '키 시험' && k.action === 'feature_action'));
+    await until(() => status(base), s => s.keyTest?.active === true);
+    const appPress = async index => {
+      const before = await status(base);
+      const response = await fetch(`${base}/api/press`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index, revision: before.deck.revision }), signal: AbortSignal.timeout(10_000) });
+      return response.json();
+    };
+    assert.equal((await appPress(0)).code, 'updated');
+    assert.equal((await status(base)).keyTest?.active, true);
+    assert.equal((await appPress(profile.keyCount - 1)).code, 'navigated');
+    await until(() => status(base), s => s.keyTest === null && s.deck?.mode === 'settings');
 
     // Command packets are 00 'CRT' 00 00 <command>. Never the boot-logo (LOG) command.
     const commands = (await readText(hidLog)).split('\n').filter(line => line.startsWith('004352540000')).map(line => Buffer.from(line.slice(12, 18), 'hex').toString('latin1'));

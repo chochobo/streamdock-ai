@@ -72,6 +72,8 @@ private func check(_ condition: @autoclosure () -> Bool, _ message: String) thro
         try check(DiagnosticsReport.warningKinds(["a", "b"], codes: ["credits_unreadable"]) == ["other"], "mismatched code count falls back to text")
         let coded = try decoder.decode(DashboardState.self, from: Data(#"{"device":{"connected":true},"warnings":["x"],"warningCodes":["refresh_failed"]}"#.utf8))
         try check(coded.warningCodes == ["refresh_failed"], "warning codes decode")
+        let stringLayout = try decoder.decode(DashboardState.self, from: Data(#"{"device":{"connected":true},"deck":{"revision":3,"keys":[{"index":0}],"layout":"xl"}}"#.utf8))
+        try check(stringLayout.deck?.keys.count == 1 && stringLayout.deck?.deckLayout == .s293, "non-object layout keeps the status and falls back to 293S")
         let structuredPermission = Data(#"{"device":{"connected":false},"usage":{"issues":[{"provider":"claude-desktop","code":"permission_required"}]}}"#.utf8)
         let structuredState = try decoder.decode(DashboardState.self, from: structuredPermission)
         try check(structuredState.claudeAccessibilityRequired, "structured accessibility warning")
