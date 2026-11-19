@@ -9,7 +9,8 @@ import path from 'node:path';
 import { createDevice, keyTileSvg } from './device.mjs';
 import { createNativeDevice } from './native-hid.mjs';
 import { readAgents } from './agents.mjs';
-import { buildSummary, summarySvgs } from './summary.mjs';
+import { buildSummary, summarySvgs, summaryKeySvgs } from './summary.mjs';
+import { PROFILES, DEFAULT_PROFILE_ID, profileById, layoutFor, publicLayout } from './device-profiles.mjs';
 import { createDeck } from './deck.mjs';
 import { focusSession } from './focus.mjs';
 import { createCodexUsageProvider } from './usage-codex.mjs';
@@ -46,7 +47,12 @@ const mode = process.argv.includes('--device') ? 'hardware' : 'simulator';
 const nativeToken = /^[a-f0-9]{64}$/.test(process.env.STREAMDOCK_NATIVE_TOKEN || '') ? Buffer.from(process.env.STREAMDOCK_NATIVE_TOKEN, 'hex') : null;
 let nativeSummaryKey = '';
 let nativeSummaryFrames = [];
-const nativeKeyCache = Array(15).fill(null);
+// The connected device decides the layout. Before one is detected, use
+// STREAMDOCK_MODEL, else the 293S V3. device.profile() keeps the last
+// detected model while disconnected, so the layout follows it.
+const initialProfile = process.env.STREAMDOCK_MODEL ? profileById(process.env.STREAMDOCK_MODEL) : PROFILES[DEFAULT_PROFILE_ID];
+let layout = layoutFor(initialProfile);
+let nativeKeyCache = Array(layout.keyCount).fill(null);
 const nativeProviders = nativeToken ? createNativeProviderSettings() : null;
 const deck = createDeck();
 const router = createModeRouter();
@@ -58,18 +64,22 @@ const parcelImporter = createParcelImport();
 const immediateKeys = new Set();
 const swiftHidPath = mode === 'hardware' ? process.env.STREAMDOCK_SWIFT_HID_PATH : undefined;
 const deviceFactory = swiftHidPath ? options => createNativeDevice({ ...options, helperPath: swiftHidPath }) : createDevice;
-const device = deviceFactory({ mode, onKeyEvent: (index, action, heldMs) => {
+const device = deviceFactory({ mode, profile: initialProfile, onKeyEvent: (index, action, heldMs) => {
   if (reconnecting) { immediateKeys.delete(index); return; }
   if (action === 'cancel') { immediateKeys.delete(index); return; }
-  if (action === 'down' && displayOwner === 'router' && ((router.current() === 'games' && gameFrame) || (router.current() === 'scenes' && sceneFrame))) {
+  // Summary keys have no action; scenes and games only use the legacy area.
+  if (!Number.isInteger(index) || index < 0 || index >= layout.keyCount || layout.summaryKeys.includes(index) ||
+      (legacyFrameActive() && !layout.legacy.keys.includes(index))) { immediateKeys.delete(index); return; }
+  const sceneExitKey = layout.legacy.keys[14];
+  if (action === 'down' && legacyFrameActive()) {
     immediateKeys.add(index);
     if (router.current() === 'games') enqueueGameInput(index);
-    else if (index !== 14) handlePhysicalPress(index, 0);
+    else if (index !== sceneExitKey) handlePhysicalPress(index, 0);
     return;
   }
   if (action === 'up') {
     if (immediateKeys.delete(index)) {
-      if (displayOwner === 'router' && router.current() === 'scenes' && sceneFrame && index === 14) handlePhysicalPress(index, heldMs);
+      if (displayOwner === 'router' && router.current() === 'scenes' && sceneFrame && index === sceneExitKey) handlePhysicalPress(index, heldMs);
       return;
     }
     handlePhysicalPress(index, heldMs);
@@ -270,6 +280,59 @@ async function gameSideImages(frame) {
   return images;
 }
 
+function legacyFrameActive() {
+  return displayOwner === 'router' && ((router.current() === 'games' && gameFrame) || (router.current() === 'scenes' && sceneFrame));
+}
+
+// Router layout while a scene or game frame is shown: its 15 positions are
+// the legacy area, so controls sit where the 293S frame expects them.
+function legacyRouterLayout() {
+  const keys = layout.legacy.keys;
+  return { ...layout, controls: { modes: keys[11], usage: keys[12], back: keys[12], prev: keys[13], next: keys[14] }, homeContent: keys.slice(0, 11), pageContent: keys.slice(0, 12) };
+}
+
+let blankKey = null;
+async function blankKeyImage() {
+  blankKey ||= await sharp({ create: { width: 96, height: 96, channels: 3, background: '#000000' } }).png().toBuffer();
+  return blankKey;
+}
+
+// Place a 293S-shaped frame (tile index 0-14, side slots 16-18) on the
+// current device. Devices without side screens draw the sides as keys and
+// blank the summary keys, which render() never touches.
+function placeLegacyFrame(tiles, sides, blank) {
+  const keys = tiles.map(tile => ({ index: layout.legacy.keys[tile.index], image: tile.image })).filter(tile => Number.isInteger(tile.index));
+  if (layout.sideSlots.length) return { keys, sides };
+  for (const side of sides) {
+    const index = layout.legacy.sides[side.slot - 16];
+    if (Number.isInteger(index)) keys.push({ index, image: side.image });
+  }
+  for (const index of layout.summaryKeys) if (!keys.some(key => key.index === index)) keys.push({ index, image: blank });
+  return { keys, sides: [] };
+}
+
+// Adopt the profile the device reports. A model change invalidates every
+// cache keyed by key position.
+function syncLayout() {
+  const profile = typeof device.profile === 'function' ? device.profile() : null;
+  if (!profile || !Object.values(PROFILES).includes(profile) || profile.id === layout.model) return;
+  layout = layoutFor(profile);
+  nativeKeyCache = Array(layout.keyCount).fill(null);
+  nativeSummaryKey = '';
+  nativeSummaryFrames = [];
+  immediateKeys.clear();
+  gameInputs.length = 0;
+  lastRender = '';
+  lastSummary = '';
+}
+
+// A reconnect can switch the device model while a refresh is awaiting I/O.
+// Never send a plan built for one model to another; the next refresh re-plans.
+function layoutCurrent() {
+  const profile = typeof device.profile === 'function' ? device.profile() : null;
+  return !profile || profile.id === layout.model;
+}
+
 function recordPhysicalInput(index, result) {
   lastInputOutcome = { index, code: typeof result?.code === 'string' ? result.code : 'error', at: new Date().toISOString() };
   snapshot = { ...snapshot, lastInput: lastInputOutcome };
@@ -356,7 +419,8 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
       if (updateReview?.stage === 'review' && Date.parse(updateReview.expiresAt || '') <= Date.now()) { updater.cancel(); updateReview = null; }
       const usage = usageSnapshot;
       const serviceWarnings = [...(result.warnings || []), ...(settingsWarning ? [settingsWarning] : [])];
-      const basePlan = deck.plan(agents, usage);
+      syncLayout();
+      const basePlan = deck.plan(agents, usage, layout);
       let plan = basePlan;
       if (displayOwner === 'router') {
         const active = router.current();
@@ -376,7 +440,8 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
             : { id: 'parcel-wait', label: '앱 검토', caption: '확인 필요', detail: '앱에서 전송 대상을 확인하세요.', state: 'unknown', kind: 'feature', enabled: false },
           { id: 'parcel-cancel', label: '취소', caption: '돌아가기', detail: '배송 조회를 취소합니다.', state: 'idle', kind: 'feature', action: 'parcels:cancel' },
         ];
-        plan = router.planPage({ items, availability: featureAvailability });
+        const framed = (active === 'games' && gameFrame) || (active === 'scenes' && sceneFrame);
+        plan = router.planPage({ items, availability: featureAvailability, layout: framed ? legacyRouterLayout() : layout });
       }
       const language = settings.get().language || 'ko';
       if (displayOwner === 'deck') plan = alerts.decorate(plan);
@@ -388,17 +453,20 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
       let nativeSideFrames = [];
       let nativeRenderedKeys = [];
       let nativeSummary = null;
+      let legacyFrames = [];
       try {
         let rendered = true;
-        if (renderKey !== lastRender) rendered = await device.render(plan.keys);
+        if (!layoutCurrent()) rendered = false;
+        else if (renderKey !== lastRender) rendered = await device.render(plan.keys);
         const activeGame = displayOwner === 'router' && router.current() === 'games' && gameFrame;
         const activeScene = displayOwner === 'router' && router.current() === 'scenes' && sceneFrame;
-        if ((activeGame || activeScene) && (rendered || device.status().mode === 'simulator')) {
-          const frame = activeScene || activeGame;
-          const images = frame.tiles.filter(tile => activeScene || tile.index < 10).map(tile => ({ index: tile.index, image: tile.png }));
-          const sides = activeScene ? frame.sideTiles.map(tile => ({ slot: tile.slot, image: tile.png })) : await gameSideImages(frame);
-          nativeSideFrames = nativeFrameUrls(sides);
-          const frameRendered = await device.renderImages({ keys: images, sides });
+        const frame = activeScene || activeGame;
+        const placed = frame ? placeLegacyFrame(frame.tiles.filter(tile => activeScene || tile.index < 10).map(tile => ({ index: tile.index, image: tile.png })),
+          activeScene ? frame.sideTiles.map(tile => ({ slot: tile.slot, image: tile.png })) : await gameSideImages(frame), await blankKeyImage()) : null;
+        legacyFrames = placed ? placed.keys : [];
+        if (placed && layoutCurrent() && (rendered || device.status().mode === 'simulator')) {
+          nativeSideFrames = nativeFrameUrls(placed.sides);
+          const frameRendered = await device.renderImages(placed);
           if (device.status().mode !== 'simulator') rendered = rendered && frameRendered;
           lastSummary = '';
         }
@@ -408,16 +476,16 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
           if (nextSignature !== globalSignature) { globalRevision++; globalSignature = nextSignature; }
           committedOwner = displayOwner;
           alertPlan = displayOwner === 'deck' ? basePlan : null;
-          const visibleFrames = activeScene ? activeScene.tiles : activeGame ? activeGame.tiles.filter(tile => tile.index < 10) : [];
-          committedDeck = { ...committed, revision: globalRevision, scope: basePlan.scope, projects: basePlan.projects,
-            ...(visibleFrames.length ? { frames: visibleFrames.map(tile => ({ index: tile.index, url: `data:image/png;base64,${tile.png.toString('base64')}` })) } : {}) };
+          committedDeck = { ...committed, revision: globalRevision, scope: basePlan.scope, projects: basePlan.projects, layout: publicLayout(layout),
+            ...(legacyFrames.length ? { frames: legacyFrames.map(tile => ({ index: tile.index, url: `data:image/png;base64,${tile.image.toString('base64')}` })) } : {}) };
           targets = result.targets instanceof Map ? result.targets : new Map();
           if (rendered || deviceStatus.mode === 'simulator') lastRender = renderKey;
         }
         const scoped = agents.filter(a => !a.isSubagent && (basePlan.scope === 'history' ? a.presence !== 'live' : a.presence === 'live') && (displayOwner !== 'deck' || basePlan.view !== 'sessions' || a.projectId === basePlan.project?.id));
         const summary = { ...buildSummary(scoped, updatedAt, [...serviceWarnings, ...(feedbackError ? [feedback] : [])]), language };
         nativeSummary = nativeToken ? summary : null;
-        if (!activeGame && !activeScene && nativeToken) {
+        const showSummary = !activeGame && !activeScene;
+        if (showSummary && nativeToken) {
           try { nativeSideFrames = await nativeSummarySideFrames(summary); } catch { nativeSideFrames = []; }
         }
         if (nativeToken && committedDeck) {
@@ -425,7 +493,7 @@ async function refresh(force = false, useCachedAgents = false, reconnectRender =
           committedDeck = { ...committedDeck, sideFrames: nativeSideFrames, keyFrames: nativeRenderedKeys };
         }
         const summaryKey = JSON.stringify(summary);
-        if (!activeGame && !activeScene && summaryKey !== lastSummary) {
+        if (showSummary && summaryKey !== lastSummary && layoutCurrent()) {
           const summaryRendered = await device.renderSummary(summary);
           if (summaryRendered || device.status().mode === 'simulator') lastSummary = summaryKey;
         }
@@ -489,7 +557,7 @@ async function refreshUsage() {
 }
 
 async function press(index, revision, heldMs = 0) {
-  if (!Number.isInteger(index) || index < 0 || index > 14) return { ok: false, code: 'invalid', message: '버튼 번호가 올바르지 않습니다.' };
+  if (!Number.isInteger(index) || index < 0 || index >= layout.keyCount) return { ok: false, code: 'invalid', message: '버튼 번호가 올바르지 않습니다.' };
   if (actionBusy || reconnecting) return { ok: false, code: 'busy', message: '화면을 갱신 중입니다. 다시 눌러 주세요.' };
   // Preserve the mapping visible when the button was pressed. Wait for a
   // repaint instead of dropping physical input, then reject stale mappings.
@@ -502,14 +570,17 @@ async function press(index, revision, heldMs = 0) {
   actionBusy = true;
   lastInteraction = Date.now();
   try {
-    if (committedOwner === 'router' && router.current() === 'scenes' && sceneFrame && (revision === undefined || index < 12)) {
-      if (index === 14 && heldMs >= 1200) {
+    // Scene input uses 293S legacy tile numbers; keys outside the area do nothing.
+    const sceneIndex = layout.legacy.keys.indexOf(index);
+    if (committedOwner === 'router' && router.current() === 'scenes' && sceneFrame && (revision === undefined || (sceneIndex >= 0 && sceneIndex < 12))) {
+      if (sceneIndex < 0) return { ok: false, code: 'empty', message: '이 버튼에는 동작이 없습니다.' };
+      if (sceneIndex === 14 && heldMs >= 1200) {
         await scenes.stop();
         sceneFrame = null;
         autoScene = false;
         sound.stopAmbient();
         router.openHub();
-      } else sceneFrame = await scenes.press(index);
+      } else sceneFrame = await scenes.press(sceneIndex);
       feedback = '';
       feedbackError = false;
       await refresh(true);
@@ -821,7 +892,7 @@ function nativeAuthorized(req) {
 }
 
 async function nativeKeyFrames(keys) {
-  if (!nativeToken || !Array.isArray(keys) || keys.length !== 15) return [];
+  if (!nativeToken || !Array.isArray(keys) || keys.length !== layout.keyCount) return [];
   const frames = await Promise.all(keys.map(async (key, index) => {
     if (!key || key.index !== index) return null;
     const svg = keyTileSvg(key);
@@ -833,7 +904,10 @@ async function nativeKeyFrames(keys) {
     nativeKeyCache[index] = { svg, frame };
     return frame;
   }));
-  return frames.every(Boolean) ? frames : [];
+  if (!frames.every(Boolean)) return [];
+  // Devices without side screens show the summary on summary keys.
+  for (const frame of nativeSummaryFrames) if (frame.index !== undefined && layout.summaryKeys.includes(frame.index)) frames[frame.index] = frame;
+  return frames;
 }
 
 function nativePublicSnapshot(value, req) {
@@ -853,8 +927,18 @@ function nativeFrameUrls(sides) {
 
 async function nativeSummarySideFrames(summary) {
   if (!nativeToken) return [];
-  const key = JSON.stringify(summary);
-  if (nativeSummaryKey === key && nativeSummaryFrames.length === 3) return nativeSummaryFrames;
+  const key = JSON.stringify([layout.model, summary]);
+  if (nativeSummaryKey === key && nativeSummaryFrames.length === 3) return layout.sideSlots.length ? nativeSummaryFrames : [];
+  if (!layout.sideSlots.length) {
+    // Summary keys are previewed through keyFrames; nativeKeyFrames overlays them.
+    const frames = (await Promise.all(summaryKeySvgs(summary).slice(0, layout.summaryKeys.length).map(async (svg, index) => {
+      const image = await sharp(Buffer.from(svg)).png().toBuffer();
+      if (!Buffer.isBuffer(image) || !image.length || image.length > 128 * 1024) return null;
+      return { index: layout.summaryKeys[index], url: `data:image/png;base64,${image.toString('base64')}` };
+    }))).filter(Boolean);
+    if (frames.length === 3) { nativeSummaryKey = key; nativeSummaryFrames = frames; }
+    return [];
+  }
   const images = await Promise.all(summarySvgs(summary).map(async (svg, index) => ({
     slot: 16 + index, image: await sharp(Buffer.from(svg)).png().toBuffer(),
   })));
@@ -1040,7 +1124,7 @@ await device.start();
 await refresh();
 server.listen(port, '127.0.0.1', () => { console.log(`StreamDock AI: http://127.0.0.1:${port} (${mode})`); void refreshUsage(); });
 function enqueueGameInput(index) {
-  if (!Number.isInteger(index) || index < 0 || index > 14 || gameInputs.length >= 32 || !committedDeck) return;
+  if (!Number.isInteger(index) || index < 0 || index >= layout.keyCount || gameInputs.length >= 32 || !committedDeck) return;
   gameInputs.push({ index, revision: committedDeck.revision });
   if (gameInputDraining) return;
   gameInputDraining = true;
@@ -1069,7 +1153,7 @@ function blinkAlerts() {
   const language = settings.get().language || 'ko';
   const keys = translateKeys(alerts.decorate(alertPlan).keys, language).map(key => ({ ...key, language }));
   const renderKey = JSON.stringify(keys);
-  if (renderKey === lastRender) return;
+  if (renderKey === lastRender || !layoutCurrent()) return;
   rendering = true;
   blinkPending = (async () => {
     try {
@@ -1095,17 +1179,17 @@ async function animate() {
   animationPending = true;
   try {
     const frame = current === 'games' ? await games.tick() : await scenes.tick();
-    if (closing || reconnecting || actionBusy || rendering || pending || displayOwner !== 'router' || router.current() !== current || (current === 'games' ? gameFrame !== prior : sceneFrame !== prior)) return;
+    if (closing || reconnecting || actionBusy || rendering || pending || displayOwner !== 'router' || router.current() !== current || (current === 'games' ? gameFrame !== prior : sceneFrame !== prior) || !layoutCurrent()) return;
     if (current === 'games') { gameFrame = frame; for (const cue of frame.sounds || []) void sound.play(cue); }
     else sceneFrame = frame;
     rendering = true;
     try {
       const images = frame.tiles.filter(tile => current === 'scenes' || tile.index < 10).map(tile => ({ index: tile.index, image: tile.png }));
-      const sides = current === 'scenes' ? frame.sideTiles.map(tile => ({ slot: tile.slot, image: tile.png })) : await gameSideImages(frame);
-      await device.renderImages({ keys: images, sides });
+      const placed = placeLegacyFrame(images, current === 'scenes' ? frame.sideTiles.map(tile => ({ slot: tile.slot, image: tile.png })) : await gameSideImages(frame), await blankKeyImage());
+      await device.renderImages(placed);
       if (committedDeck) {
-        const frames = frame.tiles.filter(tile => current === 'scenes' || tile.index < 10).map(tile => ({ index: tile.index, url: `data:image/png;base64,${tile.png.toString('base64')}` }));
-        committedDeck = { ...committedDeck, frames, ...(nativeToken ? { sideFrames: nativeFrameUrls(sides) } : {}) };
+        const frames = placed.keys.map(tile => ({ index: tile.index, url: `data:image/png;base64,${tile.image.toString('base64')}` }));
+        committedDeck = { ...committedDeck, frames, ...(nativeToken ? { sideFrames: nativeFrameUrls(placed.sides) } : {}) };
         snapshot = { ...snapshot, device: device.status(), deck: { ...committedDeck, message: feedback || committedDeck.message } };
       }
     } finally { rendering = false; }

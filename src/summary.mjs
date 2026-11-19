@@ -166,3 +166,26 @@ export async function renderSummaryTiles(summary, sharp) {
     jpeg: await sharp(Buffer.from(image)).rotate(-90).jpeg({ quality: 85 }).toBuffer(),
   })));
 }
+
+// The 293S tiles keep their content at x=26..90 because the bezel covers the
+// left edge of the side screens. A full key shows the whole face, so shift
+// the content left by 10 px to centre it (x=16..80).
+const KEY_SHIFT = -10;
+
+/** Upright 96 × 96 SVGs for devices that show the summary on regular keys. */
+export function summaryKeySvgs(summary) {
+  return summarySvgs(summary).map(image => image.replace('<g font-family="sans-serif">', `<g font-family="sans-serif" transform="translate(${KEY_SHIFT} 0)">`));
+}
+
+/** Return [overview, attention, clock] JPEGs sized and rotated for the model's keys. */
+export async function renderSummaryKeyImages(summary, sharp, { size = SIZE, rotate = 0 } = {}) {
+  if (typeof sharp !== 'function') throw new TypeError('sharp is required');
+  if (!Number.isInteger(size) || size < 16 || size > 256 || ![0, 90, -90, 180, 270].includes(rotate)) throw new RangeError('Invalid summary key image options');
+  return Promise.all(summaryKeySvgs(summary).map(async image => {
+    const make = quality => sharp(Buffer.from(image)).resize(size, size, { fit: 'fill' }).rotate(rotate).jpeg({ quality }).toBuffer();
+    let jpeg = await make(85);
+    if (jpeg.length > 10_240) jpeg = await make(65);
+    if (jpeg.length > 10_240) throw new Error('Summary image exceeds device limit');
+    return jpeg;
+  }));
+}

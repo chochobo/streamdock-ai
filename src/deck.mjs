@@ -1,10 +1,12 @@
-/** The 293S project/session selector. It never opens a session itself.
+import { PROFILES, layoutFor } from './device-profiles.mjs';
+
+/** The project/session selector. It never opens a session itself.
  * The caller must block key input during physical redraw, then commit only after
- * every key was written. Public IDs are opaque, not raw provider session IDs. */
+ * every key was written. Public IDs are opaque, not raw provider session IDs.
+ * Key positions come from a device layout (see device-profiles.mjs); the
+ * default is the 293S V3 layout. */
+const DEFAULT_LAYOUT = layoutFor(PROFILES['293sv3']);
 const PRIORITY = { blocked: 0, error: 1, working: 2, done: 3, idle: 4, unknown: 5 };
-const HOME_CAPACITY = 11;
-const USAGE_WINDOWS_PER_PAGE = 6;
-const SESSION_CAPACITY = 12;
 const clean = value => String(value || '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, 160);
 const statusOf = a => Object.hasOwn(PRIORITY, a.status) ? a.status : 'unknown';
 const isEstimated = a => (a?.confidence ?? a?.statusConfidence) ? (a.confidence ?? a.statusConfidence) === 'inferred' : a?.source === 'codex-rollout';
@@ -83,6 +85,38 @@ function usageWindows(usage) {
   return entries;
 }
 
+// Split usage tiles into pages. A usage/reset pair needs two physically
+// adjacent keys (index n and n + 1), so it never straddles a summary key or
+// a gap; on the XL every such break is also a row break.
+function usagePages(windows, positions) {
+  const pages = [[]];
+  let cursor = 0;
+  for (const window of windows) {
+    const size = window.accountUnavailable ? 1 : 2;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let at = cursor;
+      if (size === 2) while (at + 1 < positions.length && positions[at + 1] !== positions[at] + 1) at++;
+      if (at + size <= positions.length) {
+        pages.at(-1).push({ window, indexes: positions.slice(at, at + size) });
+        cursor = at + size;
+        break;
+      }
+      if (attempt === 0 && pages.at(-1).length) { pages.push([]); cursor = 0; continue; }
+      break;
+    }
+  }
+  return pages;
+}
+
+// keyTileSvg infers the arrow of a disabled prev/next key only at the 293S
+// positions 13/14. Elsewhere name the action; disabled keys stay unbound.
+function nameDisabledArrows(keys, controls) {
+  for (const action of ['prev', 'next']) {
+    const index = controls[action];
+    if (keys[index].disabled && index !== DEFAULT_LAYOUT.controls[action]) keys[index] = { ...keys[index], action };
+  }
+}
+
 export function createDeck() {
   let view = 'projects';
   let scope = 'live';
@@ -97,7 +131,8 @@ export function createDeck() {
   let revision = 0;
   let navigationPending = false;
 
-  function plan(agents = [], usage = {}) {
+  function plan(agents = [], usage = {}, layout = DEFAULT_LAYOUT) {
+    const { keyCount, controls, homeContent, pageContent } = layout;
     const roots = agents.filter(a => a && typeof a.id === 'string' && a.id && !a.isSubagent && (scope === 'live' ? a.presence === 'live' : a.presence !== 'live'));
     const projectOrder = projectOrders[scope];
     const sessionOrders = sessionOrdersByScope[scope];
@@ -122,75 +157,67 @@ export function createDeck() {
     }
     for (const id of sessionOrders.keys()) if (!grouped.has(id) && id !== selectedProject?.id) sessionOrders.delete(id);
     const groupById = new Map(orderedGroups.map(group => [group.id, group]));
-    const keys = Array.from({ length: 15 }, (_, index) => empty(index));
-    const bindings = Array(15).fill(null);
+    const keys = Array.from({ length: keyCount }, (_, index) => empty(index));
+    const bindings = Array(keyCount).fill(null);
     let page, pages, project = null;
     if (view === 'projects') {
-      pages = Math.max(1, Math.ceil(projectOrder.length / HOME_CAPACITY));
+      const capacity = homeContent.length;
+      pages = Math.max(1, Math.ceil(projectOrder.length / capacity));
       projectPage = Math.min(projectPage, pages - 1);
       page = projectPage;
-      projectOrder.slice(page * HOME_CAPACITY, (page + 1) * HOME_CAPACITY).forEach((id, index) => {
+      projectOrder.slice(page * capacity, (page + 1) * capacity).forEach((id, slot) => {
         const group = groupById.get(id);
         if (!group) return;
+        const index = homeContent[slot];
         const captionName = { blocked: '확인', error: '오류', working: '작업', done: '완료', idle: '대기', unknown: '미확인' }[group.state];
         keys[index] = { index, label: group.name, state: group.state, estimated: group.estimated, kind: 'project', action: 'project', count: group.total, caption: `${captionName} ${group.counts[group.state]}${group.estimated ? '?' : ''}`, detail: `${group.total}개 세션` };
         bindings[index] = { action: 'project', projectId: group.id, projectName: group.name };
       });
-      keys[11] = scope === 'live' ? control(11, 'modes', '기능', true) : control(11, 'toggle_scope', '열림', true);
-      keys[12] = control(12, 'usage', '사용량', true);
-      keys[13] = control(13, 'prev', '이전', page > 0);
-      keys[14] = control(14, 'next', '다음', page + 1 < pages);
+      keys[controls.modes] = scope === 'live' ? control(controls.modes, 'modes', '기능', true) : control(controls.modes, 'toggle_scope', '열림', true);
+      keys[controls.usage] = control(controls.usage, 'usage', '사용량', true);
+      keys[controls.prev] = control(controls.prev, 'prev', '이전', page > 0);
+      keys[controls.next] = control(controls.next, 'next', '다음', page + 1 < pages);
     } else if (view === 'usage') {
-      const windows = usageWindows(usage);
-      const pageGroups = [[]];
-      let usedKeys = 0;
-      for (const window of windows) {
-        const size = window.accountUnavailable ? 1 : 2;
-        if (usedKeys + size > USAGE_WINDOWS_PER_PAGE * 2) { pageGroups.push([]); usedKeys = 0; }
-        pageGroups.at(-1).push(window);
-        usedKeys += size;
-      }
+      const pageGroups = usagePages(usageWindows(usage), pageContent);
       pages = pageGroups.length;
       usagePage = Math.min(usagePage, pages - 1);
       page = usagePage;
-      let index = 0;
-      for (const window of pageGroups[page]) {
+      for (const { window, indexes: [usageIndex, resetIndex] } of pageGroups[page]) {
         const state = window.usageStatus === 'ok' && window.usedPercent !== null
           ? (window.usedPercent >= 90 ? 'error' : window.usedPercent >= 70 ? 'blocked' : 'working') : 'unknown';
-        keys[index] = { index, ...window, state, kind: 'quota', action: 'none', disabled: true };
-        index++;
-        if (!window.accountUnavailable) {
-          keys[index] = { index, ...window, state, kind: 'quota-reset', action: 'none', disabled: true };
-          index++;
-        }
+        keys[usageIndex] = { index: usageIndex, ...window, state, kind: 'quota', action: 'none', disabled: true };
+        if (resetIndex !== undefined) keys[resetIndex] = { index: resetIndex, ...window, state, kind: 'quota-reset', action: 'none', disabled: true };
       }
-      keys[12] = control(12, 'back', '뒤로', true);
-      keys[13] = control(13, 'prev', '이전', page > 0);
-      keys[14] = control(14, 'next', '다음', page + 1 < pages);
+      keys[controls.back] = control(controls.back, 'back', '뒤로', true);
+      keys[controls.prev] = control(controls.prev, 'prev', '이전', page > 0);
+      keys[controls.next] = control(controls.next, 'next', '다음', page + 1 < pages);
     } else {
       const group = groupById.get(selectedProject?.id);
       project = { ...selectedProject };
       const order = sessionOrders.get(selectedProject?.id) || [];
-      pages = Math.max(1, Math.ceil(order.length / SESSION_CAPACITY));
+      const capacity = pageContent.length;
+      pages = Math.max(1, Math.ceil(order.length / capacity));
       sessionPage = Math.min(sessionPage, pages - 1);
       page = sessionPage;
       const byId = new Map((group?.sessions || []).map(a => [a.id, a]));
-      order.slice(page * SESSION_CAPACITY, (page + 1) * SESSION_CAPACITY).forEach((id, index) => {
+      order.slice(page * capacity, (page + 1) * capacity).forEach((id, slot) => {
         const session = byId.get(id);
         if (!session) return;
+        const index = pageContent[slot];
         const provider = clean(session.provider || 'agent');
         const label = clean(session.title || session.name || session.project || provider);
         keys[index] = { index, label, state: statusOf(session), estimated: isEstimated(session), kind: 'session', action: 'session', provider, detail: provider === 'claude' ? 'Claude Code' : provider === 'codex' ? 'Codex' : provider };
         bindings[index] = { action: 'session', sessionId: session.id };
       });
-      keys[12] = control(12, 'back', '뒤로', true);
-      keys[13] = control(13, 'prev', '이전', page > 0);
-      keys[14] = control(14, 'next', '다음', page + 1 < pages);
+      keys[controls.back] = control(controls.back, 'back', '뒤로', true);
+      keys[controls.prev] = control(controls.prev, 'prev', '이전', page > 0);
+      keys[controls.next] = control(controls.next, 'next', '다음', page + 1 < pages);
     }
-    for (const index of [11, 12, 13, 14]) {
+    for (const index of new Set(Object.values(controls))) {
       const key = keys[index];
-      if (key.kind === 'control' && key.action !== 'none') bindings[index] = { action: key.action };
+      if (key.kind === 'control' && !key.disabled) bindings[index] = { action: key.action };
     }
+    nameDisabledArrows(keys, controls);
     const signature = JSON.stringify({ view, scope, project, page, bindings });
     const nextRevision = signature === committedSignature ? revision : revision + 1;
     return { revision: nextRevision, view, scope, project, page: page + 1, pages, keys, bindings,
@@ -199,7 +226,7 @@ export function createDeck() {
       _signature: signature };
   }
   function commit(planned) {
-    if (!planned || !Array.isArray(planned.bindings) || planned.bindings.length !== 15 || typeof planned._signature !== 'string') throw new TypeError('Invalid deck plan');
+    if (!planned || !Array.isArray(planned.bindings) || !Array.isArray(planned.keys) || planned.bindings.length !== planned.keys.length || !Object.values(PROFILES).some(profile => profile.keyCount === planned.bindings.length) || typeof planned._signature !== 'string') throw new TypeError('Invalid deck plan');
     committed = planned;
     committedSignature = planned._signature;
     revision = planned.revision;
@@ -208,7 +235,7 @@ export function createDeck() {
     return snapshot;
   }
   function press(index, expectedRevision) {
-    if (!committed || !Number.isInteger(index) || index < 0 || index > 14) return { type: 'none' };
+    if (!committed || !Number.isInteger(index) || index < 0 || index >= committed.bindings.length) return { type: 'none' };
     if (expectedRevision !== undefined && expectedRevision !== revision) return { type: 'stale', revision };
     if (navigationPending) return { type: 'busy' };
     const binding = committed.bindings[index];

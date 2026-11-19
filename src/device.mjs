@@ -2,14 +2,15 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { renderSummaryTiles } from './summary.mjs';
+import { renderSummaryTiles, renderSummaryKeyImages } from './summary.mjs';
+import { PROFILES, profileForUsb, layoutFor } from './device-profiles.mjs';
 
-// 293sV3: Mirabox SDK model definition; the row layout follows Bitfocus's
-// 293S model. Hardware behaviour has not yet been tested on this unit.
-const VENDOR = 0x6603;
-const PRODUCT = 0x1014;
-const KEY_IDS = [13, 10, 7, 4, 1, 14, 11, 8, 5, 2, 15, 12, 9, 6, 3];
+// Model definitions (USB IDs, slots, input codes) live in device-profiles.mjs.
+// Both supported models share this report format and command set.
 const REPORT_SIZE = 1024;
+const MAX_SLOT = 32;
+const hex = value => value.toString(16).padStart(4, '0');
+const modelName = (profile, vendorId, productId) => `${profile.name} (${hex(vendorId)}:${hex(productId)})`;
 const run = promisify(execFile);
 
 export function commandPacket(command) {
@@ -21,7 +22,7 @@ export function commandPacket(command) {
 }
 
 export function imagePackets(id, jpeg) {
-  if (!Number.isInteger(id) || id < 1 || id > 18 || !jpeg.length || jpeg.length > 10240) throw new Error('Invalid key image');
+  if (!Number.isInteger(id) || id < 1 || id > MAX_SLOT || !jpeg.length || jpeg.length > 10240) throw new Error('Invalid key image');
   const header = Buffer.alloc(8);
   header.write('BAT', 0, 'ascii');
   header.writeUInt32BE(jpeg.length, 3);
@@ -36,16 +37,16 @@ export function imagePackets(id, jpeg) {
   return packets;
 }
 
-export function keyEventFromReport(data) {
-  // 293sV3 reports use ACK bytes 0–2 and OK bytes 5–6; 0 is release, 1 is press.
+export function keyEventFromReport(data, profile = PROFILES['293sv3']) {
+  // Reports use ACK bytes 0–2 and OK bytes 5–6; byte 9 is the input code, byte 10: 0 release, 1 press.
   if (!data || data.length < 11 || data[0] !== 0x41 || data[1] !== 0x43 || data[2] !== 0x4b ||
       data[5] !== 0x4f || data[6] !== 0x4b || (data[10] !== 0 && data[10] !== 1)) return null;
-  const index = KEY_IDS.indexOf(data[9]);
+  const index = profile.indexOfCode(data[9]);
   return index < 0 ? null : { index, phase: data[10] === 1 ? 'down' : 'up' };
 }
 
-export function keyIndexFromReport(data) {
-  const event = keyEventFromReport(data);
+export function keyIndexFromReport(data, profile = PROFILES['293sv3']) {
+  const event = keyEventFromReport(data, profile);
   return event?.phase === 'down' ? event.index : null;
 }
 
@@ -250,10 +251,13 @@ export function keyTileSvg(key = {}) {
   return `<svg width="96" height="96" xmlns="http://www.w3.org/2000/svg">${background}<rect x="0" y="0" width="96" height="4" fill="${color}"/>${labels}<text x="8" y="${oldBar ? 68 : bar ? 70 : 80}" fill="${color}" font-family="sans-serif" font-size="${captionSize}" font-weight="bold">${escape(caption)}</text>${icon}${providerBadge}${oldLabel}${bar}</svg>`;
 }
 
-async function tile(sharp, key) {
+async function tile(sharp, key, profile) {
   const svg = keyTileSvg(key);
+  // Tiles are drawn upright at 96 px, then scaled and rotated for the model.
   // Pillow's 90-degree rotation in the vendor SDK is counter-clockwise.
-  return sharp(Buffer.from(svg)).rotate(-90).jpeg({ quality: 85 }).toBuffer();
+  let image = sharp(Buffer.from(svg));
+  if (profile.imageSize !== 96) image = image.resize(profile.imageSize, profile.imageSize, { fit: 'fill' });
+  return image.rotate(profile.rotate).jpeg({ quality: 85 }).toBuffer();
 }
 
 async function officialAppRunning() {
@@ -263,18 +267,22 @@ async function officialAppRunning() {
 }
 
 /**
- * mode: simulator (default), or hardware for the experimental 6603:1014 driver.
+ * mode: simulator (default), or hardware for any model in device-profiles.mjs.
+ * profile: the starting model. In hardware mode start() switches to the profile
+ * of the single connected supported device; profile() returns the current one.
  * onKey(index): receives a zero-based row-major position on a key press.
  * onKeyEvent(index, phase, heldMs): down/up/cancel; durations are monotonic and bounded.
- * renderImages({keys, sides}) writes supplied PNG/JPEG buffers only, with 96px conversion.
+ * renderImages({keys, sides}) writes supplied PNG/JPEG buffers only, converted to the model's size.
  * render accepts [{index, label, state, estimated}]. status distinguishes HID connection
  * from simulation. start and stop never modify the device's boot image.
  */
-export function createDevice({ mode = 'simulator', onKey = () => {}, onKeyEvent = () => {}, maxHoldMs = 60_000, dependencies } = {}) {
+export function createDevice({ mode = 'simulator', profile: initialProfile = PROFILES['293sv3'], onKey = () => {}, onKeyEvent = () => {}, maxHoldMs = 60_000, dependencies } = {}) {
   if (!['simulator', 'hardware'].includes(mode)) throw new Error('Unknown device mode');
+  if (!Object.values(PROFILES).includes(initialProfile)) throw new TypeError('Unknown device profile');
   if (typeof onKey !== 'function' || typeof onKeyEvent !== 'function') throw new TypeError('Key callbacks must be functions');
   if (!Number.isSafeInteger(maxHoldMs) || maxHoldMs < 10 || maxHoldMs > 300_000) throw new RangeError('Invalid maximum hold time');
-  let state = { connected: false, model: mode === 'simulator' ? 'Simulator' : '293sV3 (6603:1014)', error: null, mode };
+  let profile = initialProfile;
+  let state = { connected: false, model: mode === 'simulator' ? 'Simulator' : modelName(profile, profile.vendorId, profile.productIds[0]), error: null, mode };
   let handle, sharp, heartbeat, starting;
   let queue = Promise.resolve();
   const sent = new Map();
@@ -312,7 +320,7 @@ export function createDevice({ mode = 'simulator', onKey = () => {}, onKeyEvent 
     // Do not dispatch a button against a previous screen while initial images
     // are still being sent after startup or reconnection.
     if (!state.connected) return;
-    const event = keyEventFromReport(data);
+    const event = keyEventFromReport(data, profile);
     if (!event) return;
     const { index, phase } = event;
     if (phase === 'down') {
@@ -369,8 +377,11 @@ export function createDevice({ mode = 'simulator', onKey = () => {}, onKeyEvent 
         const hid = dependencies?.hid || await import('node-hid');
         sharp = dependencies?.sharp || (await import('sharp')).default;
         const devices = await hid.devicesAsync();
-        const matches = devices.filter(d => d.vendorId === VENDOR && d.productId === PRODUCT && d.usagePage > 1025 && d.usage === 1 && d.path);
-        if (matches.length !== 1) throw new Error(matches.length ? '일치하는 장치가 여러 개입니다.' : '293sV3 장치를 찾지 못했습니다. USB 연결과 권한을 확인하세요.');
+        const matches = devices.filter(d => profileForUsb(d.vendorId, d.productId) && d.usagePage > 1025 && d.usage === 1 && d.path);
+        if (matches.length !== 1) throw new Error(matches.length ? '일치하는 장치가 여러 개입니다.' : '지원하는 StreamDock 장치(293S V3, XL)를 찾지 못했습니다. USB 연결과 권한을 확인하세요.');
+        // The connected device decides the model; caches are cleared below before connecting.
+        profile = profileForUsb(matches[0].vendorId, matches[0].productId);
+        state = { ...state, model: modelName(profile, matches[0].vendorId, matches[0].productId) };
         const opened = new hid.HID(matches[0].path);
         handle = opened;
         // Late callbacks from a previous handle must never act on a newly
@@ -388,10 +399,12 @@ export function createDevice({ mode = 'simulator', onKey = () => {}, onKeyEvent 
           await send(commandPacket([0x43, 0x4c, 0x45, 0, 0, 0, 0xff]));
           await send(commandPacket([0x53, 0x54, 0x50]));
           // Runtime-only key images. Do not send the ROM boot-logo command.
-          const svg = Buffer.from('<svg width="96" height="96" xmlns="http://www.w3.org/2000/svg"><rect width="96" height="96" fill="#000000"/></svg>');
+          const size = profile.imageSize;
+          const svg = Buffer.from(`<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><rect width="${size}" height="${size}" fill="#000000"/></svg>`);
           const black = await sharp(svg).jpeg({ quality: 85 }).toBuffer();
           let lastHeartbeat = performance.now();
-          for (const id of [...KEY_IDS, 16, 17, 18]) {
+          const slots = [...Array.from({ length: profile.keyCount }, (_, index) => profile.slotOf(index)), ...profile.sideSlots];
+          for (const id of slots) {
             for (const packet of imagePackets(id, black)) await send(packet);
             // Never interleave a heartbeat in the middle of an image transfer.
             if (performance.now() - lastHeartbeat >= 6000) {
@@ -433,15 +446,19 @@ export function createDevice({ mode = 'simulator', onKey = () => {}, onKeyEvent 
     async render(keys) {
       if (mode !== 'hardware' || !handle) return false;
       const task = queue.then(async () => {
-        const byIndex = new Map(keys.filter(k => Number.isInteger(k.index) && k.index >= 0 && k.index < 15).map(k => [k.index, k]));
-        for (let index = 0; index < 15; index++) {
+        const current = profile;
+        // Summary keys are drawn only by renderSummary.
+        const summaryKeys = new Set(layoutFor(current).summaryKeys);
+        const byIndex = new Map(keys.filter(k => Number.isInteger(k.index) && k.index >= 0 && k.index < current.keyCount).map(k => [k.index, k]));
+        for (let index = 0; index < current.keyCount; index++) {
+          if (summaryKeys.has(index)) continue;
           const key = byIndex.get(index) || {};
           const signature = JSON.stringify([key.id || '', key.action || '', key.index, key.label || '', key.state || '', Boolean(key.estimated), key.kind || '', key.caption || '', key.provider || '', Boolean(key.disabled), key.windowLabel || '', key.usedPercent ?? null, key.resetDate || '', key.resetTime || '', key.usageStatus || '', key.language || 'ko', Boolean(key.alertPulse), key.bar?.value ?? null, key.bar?.direction || '', Boolean(key.bar?.stale), key.bar?.warningAt ?? null, key.bar?.criticalAt ?? null,
             Number.isSafeInteger(key.memory?.usedBytes) && key.memory.usedBytes >= 0 ? (key.memory.usedBytes / (1024 ** 3)).toFixed(1) : null,
             key.memory?.estimated === true && Number.isSafeInteger(key.memory?.totalBytes) && key.memory.totalBytes > 0 && Number.isSafeInteger(key.memory?.usedBytes) && key.memory.usedBytes >= 0 && key.memory.usedBytes <= key.memory.totalBytes && Math.round(key.memory.usedBytes * 100 / key.memory.totalBytes) === key.bar?.value]);
           if (sent.get(index) === signature) continue;
-          const image = await tile(sharp, key);
-          for (const packet of imagePackets(KEY_IDS[index], image)) await send(packet);
+          const image = await tile(sharp, key, current);
+          for (const packet of imagePackets(current.slotOf(index), image)) await send(packet);
           sent.set(index, signature);
         }
       });
@@ -450,18 +467,19 @@ export function createDevice({ mode = 'simulator', onKey = () => {}, onKeyEvent 
       return state.connected;
     },
     async renderImages({ keys = [], sides = [] } = {}) {
-      if (!Array.isArray(keys) || !Array.isArray(sides) || keys.length > 15 || sides.length > 3) throw new TypeError('Invalid image frame');
+      const current = profile;
+      if (!Array.isArray(keys) || !Array.isArray(sides) || keys.length > current.keyCount || sides.length > current.sideSlots.length) throw new TypeError('Invalid image frame');
       const indices = new Set();
       const slots = new Set();
       const validImage = image => Buffer.isBuffer(image) && image.length >= 8 && image.length <= 2 * 1024 * 1024 &&
         (image.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ||
          (image[0] === 0xff && image[1] === 0xd8 && image[2] === 0xff));
       for (const entry of keys) {
-        if (!entry || !Number.isInteger(entry.index) || entry.index < 0 || entry.index >= 15 || indices.has(entry.index) || !validImage(entry.image)) throw new TypeError('Invalid key image');
+        if (!entry || !Number.isInteger(entry.index) || entry.index < 0 || entry.index >= current.keyCount || indices.has(entry.index) || !validImage(entry.image)) throw new TypeError('Invalid key image');
         indices.add(entry.index);
       }
       for (const entry of sides) {
-        if (!entry || !Number.isInteger(entry.slot) || ![16, 17, 18].includes(entry.slot) || slots.has(entry.slot) || !validImage(entry.image)) throw new TypeError('Invalid side image');
+        if (!entry || !Number.isInteger(entry.slot) || !current.sideSlots.includes(entry.slot) || slots.has(entry.slot) || !validImage(entry.image)) throw new TypeError('Invalid side image');
         slots.add(entry.slot);
       }
       if (mode !== 'hardware' || !handle) return false;
@@ -474,7 +492,7 @@ export function createDevice({ mode = 'simulator', onKey = () => {}, onKeyEvent 
         try {
           ready = await Promise.all(items.map(async entry => {
             const make = quality => sharp(entry.image, { failOn: 'error', limitInputPixels: 4_194_304 })
-              .resize(96, 96, { fit: 'fill' }).rotate(-90).jpeg({ quality }).toBuffer();
+              .resize(current.imageSize, current.imageSize, { fit: 'fill' }).rotate(current.rotate).jpeg({ quality }).toBuffer();
             let jpeg = await make(85);
             if (jpeg.length > 10_240) jpeg = await make(65);
             if (!Buffer.isBuffer(jpeg) || !jpeg.length || jpeg.length > 10_240) throw new Error('Output exceeds device limit');
@@ -485,11 +503,14 @@ export function createDevice({ mode = 'simulator', onKey = () => {}, onKeyEvent 
           return;
         }
         for (const entry of ready) {
-          const id = entry.target === 'key' ? KEY_IDS[entry.index] : entry.slot;
+          const id = entry.target === 'key' ? current.slotOf(entry.index) : entry.slot;
           if (entry.target === 'side' && sentSummary.get(id)?.equals(entry.jpeg)) continue;
           for (const packet of imagePackets(id, entry.jpeg)) await send(packet);
-          if (entry.target === 'key') sent.set(entry.index, entry.signature);
-          else sentSummary.set(id, Buffer.from(entry.jpeg));
+          if (entry.target === 'key') {
+            sent.set(entry.index, entry.signature);
+            // A summary key overwritten by a frame must be redrawn by the next summary.
+            sentSummary.delete(id);
+          } else sentSummary.set(id, Buffer.from(entry.jpeg));
         }
       });
       queue = task.catch(error => { fail(error); });
@@ -500,14 +521,26 @@ export function createDevice({ mode = 'simulator', onKey = () => {}, onKeyEvent 
     async renderSummary(summary) {
       if (mode !== 'hardware' || !handle) return false;
       const task = queue.then(async () => {
-        const tiles = await (dependencies?.renderSummaryTiles || renderSummaryTiles)(summary, sharp);
-        if (!Array.isArray(tiles) || tiles.length !== 3 || new Set(tiles.map(tile => tile.slot)).size !== 3 || tiles.some(tile => ![16, 17, 18].includes(tile.slot) || !Buffer.isBuffer(tile.jpeg))) {
-          throw new Error('Invalid summary images');
+        const current = profile;
+        let tiles;
+        if (current.sideSlots.length) {
+          tiles = await (dependencies?.renderSummaryTiles || renderSummaryTiles)(summary, sharp);
+          if (!Array.isArray(tiles) || tiles.length !== 3 || new Set(tiles.map(tile => tile.slot)).size !== 3 || tiles.some(tile => !current.sideSlots.includes(tile.slot) || !Buffer.isBuffer(tile.jpeg))) {
+            throw new Error('Invalid summary images');
+          }
+        } else {
+          // No side screens: draw overview, attention, clock top-to-bottom on the summary keys.
+          const summaryKeys = layoutFor(current).summaryKeys;
+          const images = await (dependencies?.renderSummaryKeyImages || renderSummaryKeyImages)(summary, sharp, { size: current.imageSize, rotate: current.rotate });
+          if (summaryKeys.length !== 3 || !Array.isArray(images) || images.length !== 3 || images.some(jpeg => !Buffer.isBuffer(jpeg))) throw new Error('Invalid summary images');
+          tiles = summaryKeys.map((index, i) => ({ slot: current.slotOf(index), jpeg: images[i], index }));
         }
-        for (const { slot, jpeg } of tiles) {
+        for (const { slot, jpeg, index } of tiles) {
           if (sentSummary.get(slot)?.equals(jpeg)) continue;
           for (const packet of imagePackets(slot, jpeg)) await send(packet);
           sentSummary.set(slot, Buffer.from(jpeg));
+          // An image frame may target this key later; it must not be skipped as cached.
+          if (index !== undefined) sent.delete(index);
         }
       });
       queue = task.catch(error => { fail(error); });
@@ -515,6 +548,7 @@ export function createDevice({ mode = 'simulator', onKey = () => {}, onKeyEvent 
       return state.connected;
     },
     status() { return { ...state }; },
+    profile() { return profile; },
     async stop() {
       if (starting) await starting;
       if (heartbeat) clearInterval(heartbeat);

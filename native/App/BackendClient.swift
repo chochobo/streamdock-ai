@@ -62,6 +62,53 @@ struct PreviewFrame: Decodable {
     }
 }
 
+struct DeckControls: Decodable, Equatable {
+    var modes: Int?
+    var usage: Int?
+    var back: Int?
+    var prev: Int?
+    var next: Int?
+}
+
+/// The connected device's key layout, as sent in `deck.layout`.
+struct DeckLayout: Decodable, Equatable {
+    var model: String
+    var name: String
+    var cols: Int
+    var rows: Int
+    var keyCount: Int
+    var sideSlots: [Int]
+    var summaryKeys: [Int]
+    var controls: DeckControls?
+
+    init(model: String, name: String, cols: Int, rows: Int, keyCount: Int, sideSlots: [Int], summaryKeys: [Int], controls: DeckControls?) {
+        self.model = model; self.name = name; self.cols = cols; self.rows = rows; self.keyCount = keyCount
+        self.sideSlots = sideSlots; self.summaryKeys = summaryKeys; self.controls = controls
+    }
+
+    private enum CodingKeys: String, CodingKey { case model, name, cols, rows, keyCount, sideSlots, summaryKeys, controls }
+
+    /// A partial or malformed layout must not discard the whole status. Missing
+    /// grid fields decode as 0 so `DeckState.deckLayout` falls back to the 293S.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? ""
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        cols = (try? c.decodeIfPresent(Int.self, forKey: .cols)) ?? 0
+        rows = (try? c.decodeIfPresent(Int.self, forKey: .rows)) ?? 0
+        keyCount = (try? c.decodeIfPresent(Int.self, forKey: .keyCount)) ?? 0
+        sideSlots = (try? c.decodeIfPresent([Int].self, forKey: .sideSlots)) ?? []
+        summaryKeys = (try? c.decodeIfPresent([Int].self, forKey: .summaryKeys)) ?? []
+        controls = (try? c.decodeIfPresent(DeckControls.self, forKey: .controls))
+        if name.isEmpty || keyCount != cols * rows { cols = 0; rows = 0 }
+    }
+
+    /// Older backends send no layout; they only drive the 293S V3.
+    static let s293 = DeckLayout(model: "293sv3", name: "Stream Dock 293S V3", cols: 5, rows: 3, keyCount: 15,
+                                 sideSlots: [16, 17, 18], summaryKeys: [],
+                                 controls: DeckControls(modes: 11, usage: 12, back: 12, prev: 13, next: 14))
+}
+
 struct DeckState: Decodable {
     var revision: Int
     var view: String?
@@ -75,6 +122,13 @@ struct DeckState: Decodable {
     var keyFrames: [PreviewFrame]?
     var sideFrames: [PreviewFrame]?
     var message: String?
+    var layout: DeckLayout?
+
+    /// The layout to draw: the backend's, or the 293S when absent or unusable.
+    var deckLayout: DeckLayout {
+        guard let layout, layout.cols > 0, layout.rows > 0 else { return .s293 }
+        return layout
+    }
 }
 
 struct DeckSummary: Decodable {
@@ -162,6 +216,9 @@ struct DashboardState: Decodable {
     var updateReview: ReviewEnvelope?
     var warnings: [String]?
     var updatedAt: String?
+
+    /// Display name of the connected device, from the deck layout.
+    var deviceName: String? { deck?.deckLayout.name }
 
     var claudeAccessibilityRequired: Bool {
         usage?.issues?.contains(where: { $0.provider == "claude-desktop" && $0.code == "permission_required" }) == true

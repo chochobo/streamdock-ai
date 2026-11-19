@@ -13,14 +13,14 @@ func emit(_ obj: [String: Any]) {
     FileHandle.standardOutput.write(Data(line.utf8))
 }
 let simulator = CommandLine.arguments.contains("--simulate")
-let device = Device293S()
+let device = StreamDockDevice()
 if !simulator {
     do {
         try device.open()
-        device.onEvent = { event in emit(["event": "key", "index": event.index, "pressed": event.pressed]) }
+        device.onEvent = { event in emit(["event": "key", "code": Int(event.code), "pressed": event.pressed]) }
         device.onDeviceAcknowledgement = { emit(["event": "device-ack"]) }
         device.onRemoval = {
-            emit(["event": "error", "message": "293S 연결이 끊어졌습니다."])
+            emit(["event": "error", "message": "장치 연결이 끊어졌습니다."])
             device.close()
             exit(1)
         }
@@ -29,7 +29,13 @@ if !simulator {
         exit(1)
     }
 }
-emit(["event": "ready", "simulated": simulator])
+// The simulator reports a 293S V3 so the parent can choose a key layout.
+let usbID = simulator ? StreamDockProtocol.supportedDevices[0] : device.usbID
+guard let usbID else {
+    emit(["event": "error", "message": StreamDockDevice.Failure.notFound.localizedDescription])
+    exit(1)
+}
+emit(["event": "ready", "simulated": simulator, "vendorId": usbID.vendorID, "productId": usbID.productID])
 DispatchQueue.global(qos: .userInitiated).async {
     while let line = readLine() {
         guard line.utf8.count <= 5000,
@@ -40,7 +46,7 @@ DispatchQueue.global(qos: .userInitiated).async {
             return
         }
         do {
-            _ = try Protocol293S.ioKitPayload(packet)
+            _ = try StreamDockProtocol.ioKitPayload(packet)
             if !simulator { try device.write(packet) }
             emit(["id": request.id, "ok": true])
         } catch {

@@ -1,0 +1,62 @@
+{
+ "device": {
+  "connected": true,
+  "model": "293sV3"
+ },
+ "deck": {
+  "revision": 1,
+  "keys": [
+   {
+    "index": 0
+   },
+   {
+    "index": 1
+   },
+   {
+    "index": 2
+   },
+   {
+    "index": 3
+   },
+   {
+    "index": 4
+   },
+   {
+    "index": 5
+   },
+   {
+    "index": 6
+   },
+   {
+    "index": 7
+   },
+   {
+    "index": 8
+   },
+   {
+    "index": 9
+   },
+   {
+    "index": 10
+   },
+   {
+    "index": 11
+   },
+   {
+    "index": 12
+   },
+   {
+    "index": 13
+   },
+   {
+    "index": 14
+   }
+  ],
+  "sideFrames": [
+   {
+    "slot": 18,
+    "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZrWQAAAAASUVORK5CYII="
+   }
+  ]
+ }
+}
