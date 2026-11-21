@@ -1,6 +1,6 @@
 // Only translate app-owned text. External names and free-form details remain intact.
 const words = Object.freeze({
-  '기능':'Features','바로가기':'Shortcuts','앱 열기':'Open app','링크':'Link','문구':'Text','길게':'Hold','볼륨 +':'Vol +','볼륨 −':'Vol −','음소거':'Mute','화면끄기':'Screen off','보호기':'Saver','올리기':'Up','내리기':'Down','전환':'Toggle','절전':'Sleep','바로가기 설정':'Shortcut setup','설정 파일 확인':'Check file','건너뜀':'Skipped','열림':'Open','사용량':'Usage','이전':'Prev','다음':'Next','뒤로':'Back',
+  '기능':'Features','바로가기':'Shortcuts','대시보드':'Dashboard','앱 열기':'Open app','링크':'Link','문구':'Text','길게':'Hold','볼륨 +':'Vol +','볼륨 −':'Vol −','음소거':'Mute','화면끄기':'Screen off','보호기':'Saver','올리기':'Up','내리기':'Down','전환':'Toggle','절전':'Sleep','바로가기 설정':'Shortcut setup','설정 파일 확인':'Check file','건너뜀':'Skipped','열림':'Open','사용량':'Usage','이전':'Prev','다음':'Next','뒤로':'Back',
   '요약':'Summary','에이전트':'Agents','기록':'History','머신':'Machine','타이머':'Timer',
   '주식':'Market','게임':'Games','장면':'Scenes','워크트리':'Worktrees','택배':'Parcels',
   '크레딧':'Credits','원격':'Remote','설정':'Settings','메모리':'Memory','메모리 사용':'Memory Used','디스크':'Disk',

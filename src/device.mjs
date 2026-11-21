@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { renderSummaryTiles, renderSummaryKeyImages } from './summary.mjs';
 import { PROFILES, profileForUsb, layoutFor } from './device-profiles.mjs';
+import { wideSliceSvg } from './dashboard-widgets.mjs';
 
 // Model definitions (USB IDs, slots, input codes) live in device-profiles.mjs.
 // Both supported models share this report format and command set.
@@ -203,6 +204,8 @@ function percentBar(value, direction, stale = false, warningAt = 70, criticalAt 
 }
 
 export function keyTileSvg(key = {}) {
+  // A slice of a picture drawn across several keys (XL dashboard, #36).
+  if (key?.kind === 'wide') return wideSliceSvg({ ...key.wide, language: key.language });
   const state = String(key?.state || 'empty').toLowerCase();
   const colors = { 'market-up': '#ff8b8b', 'market-down': '#85b7ff', 'market-flat': '#b2bed0', working: '#59d2ae', running: '#59d2ae', active: '#59d2ae', waiting: '#ffc66d', blocked: '#ffad78', error: '#fb7185', done: '#70a8ff', idle: '#b2bed0', unknown: '#b2bed0' };
   const captions = key.language === 'en' ? { working: 'Working', running: 'Working', active: 'Working', waiting: 'Review', blocked: 'Review', error: 'Error', done: 'Done', idle: 'Idle', unknown: 'Unknown' } : { working: '작업 중', running: '작업 중', active: '작업 중', waiting: '확인', blocked: '확인', error: '오류', done: '완료', idle: '대기', unknown: '미확인' };

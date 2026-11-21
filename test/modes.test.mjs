@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createModeRouter, isModeHubShortcut, MODE_CATALOG, PAGE_CAPACITY } from '../src/modes.mjs';
+import { layoutFor, PROFILES } from '../src/device-profiles.mjs';
 
 const enabled = Object.fromEntries(MODE_CATALOG.map(mode => [mode.id, true]));
 const publish = (router, options) => router.commit(router.planPage(options));
@@ -52,11 +53,12 @@ test('hub lists all modes over pages, while unavailable modes cannot be selected
   assert.equal(router.press(14, { revision: first.revision }).type, 'busy');
   const second = publish(router, { availability: enabled });
   assert.equal(second.keys[0].label, '원격');
-  assert.equal(second.keys[1].label, '바로가기');
-  assert.equal(second.keys[2].label, '설정');
+  assert.equal(second.keys[1].label, '대시보드');
+  assert.equal(second.keys[2].label, '바로가기');
+  assert.equal(second.keys[3].label, '설정');
   assert.notEqual(second.revision, first.revision);
-  assert.equal(router.press(2, { revision: first.revision }).type, 'stale');
-  assert.deepEqual(router.press(2, { revision: second.revision }), { type: 'open', mode: 'settings' });
+  assert.equal(router.press(3, { revision: first.revision }).type, 'stale');
+  assert.deepEqual(router.press(3, { revision: second.revision }), { type: 'open', mode: 'settings' });
   assert.equal(router.current(), 'settings');
 });
 
@@ -86,4 +88,31 @@ test('old plans cannot be committed after navigation and duplicate ids fail clos
   router.openMode('games');
   assert.throws(() => router.planPage({ items: [{ id: 'same' }, { id: 'same' }] }), /unique/);
   assert.throws(() => router.openMode('not-a-mode'), /Unknown mode/);
+});
+
+test('a mode whose availability is null is not offered at all, unlike a disabled one (#36)', () => {
+  const router = createModeRouter();
+  router.openHub();
+  const labels = plan => plan.keys.filter(k => k.kind === 'control' && k.action === 'open_mode').map(k => k.label);
+  const shown = router.planPage({ availability: enabled, layout: layoutFor(PROFILES.xl) });
+  assert.ok(labels(shown).includes('대시보드'));
+  const hidden = router.planPage({ availability: { ...enabled, dashboard: null }, layout: layoutFor(PROFILES.xl) });
+  assert.ok(!labels(hidden).includes('대시보드'));
+  const disabled = router.planPage({ availability: { ...enabled, dashboard: false }, layout: layoutFor(PROFILES.xl) });
+  const key = disabled.keys.find(k => k.label === '대시보드');
+  assert.ok(key && key.disabled === true, 'false keeps a grey key; null removes it');
+  assert.equal(labels(hidden).length, labels(shown).length - 1);
+});
+
+test('a wide key carries only the data the renderer reads', () => {
+  const router = createModeRouter();
+  router.openMode('dashboard');
+  const items = [{ id: 'dash-graph-1', label: '', caption: '', state: 'idle', kind: 'wide', enabled: false,
+    wide: { type: 'graph', part: 1, parts: 7, cpu: [1, 2, 'x', 300], mem: [5, 6], secret: 'token', extra: { a: 1 } } },
+    { id: 'dash-bad', label: '', caption: '', state: 'idle', kind: 'wide', enabled: false, wide: { type: 'nope' } }];
+  const plan = router.planPage({ items, availability: { dashboard: true }, layout: layoutFor(PROFILES.xl) });
+  const graph = plan.keys.find(k => k.id === 'dash-graph-1');
+  assert.deepEqual(graph.wide, { type: 'graph', parts: 7, part: 1, cpu: [1, 2, 100], mem: [5, 6] });
+  assert.equal(JSON.stringify(plan).includes('token'), false);
+  assert.equal(plan.keys.find(k => k.id === 'dash-bad').wide, undefined, 'an unknown widget type is dropped');
 });
