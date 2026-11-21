@@ -277,12 +277,36 @@ function creditItems(credits) {
   });
 }
 
+// User shortcuts (#33). Labels and captions are the user's own words and are
+// never translated; only the built-in system keys (ids scb-*) are.
+const SHORTCUT_CAPTION={app:'앱 열기',url:'링크',text:'문구',command:'길게'};
+function shortcutItems(config) {
+  const list=Array.isArray(config?.items)?config.items:[];
+  const items=list.filter(sc=>sc&&typeof sc.id==='string').map(sc=>{
+    const caption=clean(sc.caption,24)||(sc.type==='system'?'':SHORTCUT_CAPTION[sc.type]||'');
+    // The status API serves this detail to any local caller, so it never repeats snippet
+    // text, command arguments or link paths: a snippet may hold a secret.
+    let host='';if(sc.type==='url'){try{host=new URL(sc.url).hostname;}catch{host='';}}
+    const detail=sc.type==='app'?`앱 열기: ${clean(sc.app,60)}`
+      :sc.type==='url'?`링크 열기${host?`: ${clean(host,60)}`:''}`
+      :sc.type==='text'?(sc.submit?'문구를 붙여넣고 입력합니다.':'문구를 붙여넣습니다.')
+      :sc.type==='command'?'길게 눌러 명령을 실행합니다.'
+      :clean(sc.label,40);
+    return item(sc.id,clean(sc.label,40)||'바로가기',caption,detail,sc.type==='command'?'blocked':'idle',`shortcut:${sc.id}`);
+  });
+  if(config?.status==='unavailable')items.push(item('shortcuts-unavailable','설정 파일 확인','미확인','shortcuts.json을 읽지 못했습니다. 본인만 고칠 수 있는 JSON 파일인지 확인하세요.','unknown'));
+  else if(config?.status==='unconfigured')items.push(item('shortcuts-setup','바로가기 설정','설정 필요','~/.config/streamdock-ai/shortcuts.json에 항목을 적으면 여기에 나타납니다. 예제는 examples/shortcuts.example.json입니다.','unknown'));
+  if(Number.isSafeInteger(config?.skipped)&&config.skipped>0)items.push(item('shortcuts-skipped','건너뜀',`${config.skipped}개`,'형식이 맞지 않는 항목은 건너뛰었습니다.','unknown'));
+  return items;
+}
+
 /** Produce 293S feature keys. Unknown modes and missing sources are explicit. */
-export function featureItems(mode, {machine,pomodoro,market,parcels,worktrees,usage,agents,remote,credits,settings,cleanup}={}) {
+export function featureItems(mode, {machine,pomodoro,market,parcels,worktrees,usage,agents,remote,credits,settings,cleanup,shortcuts}={}) {
   switch(mode){
     case 'summary':return summaryItems({agents,usage});
     case 'machines':return machineItems(machine,cleanup);
     case 'pomodoro':return timerItems(pomodoro);
+    case 'shortcuts':return shortcutItems(shortcuts);
     case 'market':return marketItems(market);
     case 'parcels':return parcelItems(parcels);
     case 'worktrees':return worktreeItems(worktrees);

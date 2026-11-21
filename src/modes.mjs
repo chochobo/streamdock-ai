@@ -26,6 +26,7 @@ export const MODE_CATALOG = Object.freeze([
   { id: 'parcels', label: '택배', detail: '배송 현황' },
   { id: 'credits', label: '크레딧', detail: '서비스 잔액' },
   { id: 'remote', label: '원격', detail: '원격 에이전트' },
+  { id: 'shortcuts', label: '바로가기', detail: '앱·링크·문구' },
   { id: 'settings', label: '설정', detail: '연결과 밝기' },
 ].map(Object.freeze));
 

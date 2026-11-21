@@ -44,6 +44,16 @@ function keyFixtures() {
     }
     add('empty', `empty ${language}`, { kind: 'empty', state: 'empty', language });
 
+    // 바로가기(#33): 사용자 라벨은 그대로, 내장 키는 번역된다
+    for (const [label, caption, state] of [['터미널', '앱 열기', 'idle'], ['GitHub', '링크', 'idle'], ['계속', '문구', 'idle'], ['빌드 배포', '길게', 'blocked'], ['🚀 릴리스', '앱 열기', 'idle'], ['스트림독 AI', '프롬프트', 'idle']]) {
+      add('shortcut', `shortcut ${language} ${label}`, { kind: 'feature', id: 'sc-0-aaaaaaaa', label, caption, state, language });
+    }
+    const en = { '볼륨 +': 'Vol +', '볼륨 −': 'Vol −', '음소거': 'Mute', '화면끄기': 'Screen off', '보호기': 'Saver', '올리기': 'Up', '내리기': 'Down', '전환': 'Toggle', '절전': 'Sleep', '시작': 'Start' };
+    for (const [label, caption] of [['볼륨 +', '올리기'], ['볼륨 −', '내리기'], ['음소거', '전환'], ['화면끄기', '절전'], ['보호기', '시작']]) {
+      add('shortcut', `shortcut ${language} built-in ${label}`, { kind: 'feature', id: 'scb-x', label: language === 'en' ? en[label] : label, caption: language === 'en' ? en[caption] : caption, state: 'idle', language });
+    }
+
+
     // 한도(quota)와 리셋
     for (const used of PERCENTS) {
       add('quota', `quota ${language} ${used}%`, { kind: 'quota', label: 'Claude', windowLabel: '5h', usedPercent: used, language });

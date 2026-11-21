@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "builtins": true,
+  "items": [
+    { "label": "터미널", "type": "app", "app": "Terminal" },
+    { "label": "GitHub", "type": "url", "url": "https://github.com/" },
+    { "label": "계속", "caption": "프롬프트", "type": "text", "text": "계속 진행해 주세요.", "submit": true },
+    { "label": "테스트", "caption": "프롬프트", "type": "text", "text": "테스트를 돌려서 결과를 알려 주세요.", "submit": true },
+    { "label": "알림음", "caption": "길게", "type": "command", "command": ["/usr/bin/afplay", "/System/Library/Sounds/Glass.aiff"] }
+  ]
+}
