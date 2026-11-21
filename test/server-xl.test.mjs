@@ -106,12 +106,13 @@ export function createSceneBridge(){return {async start(){return f()},async tick
   assert.equal(state.deck.keys.filter(k => k.kind === 'project').length, 25);
   assert.equal(state.deck.keys[31].action, 'next');
 
-  // Key 31 is next; summary keys and out-of-range indexes do nothing.
+  // Key 31 is next; summary key 7 returns to the first page (#32); out-of-range indexes do nothing.
   await press(base, keys => keys[31]);
   state = await until(() => status(base), s => s.deck?.page === 2);
   assert.equal(state.deck.keys.filter(k => k.kind === 'project').length, 5);
   const summaryPress = await fetch(`${base}/api/press`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ index: 7, revision: state.deck.revision }) });
-  assert.equal(summaryPress.status, 409);
+  assert.equal(summaryPress.status, 200);
+  state = await until(() => status(base), s => s.deck?.page === 1);
   const outside = await fetch(`${base}/api/press`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ index: 32, revision: state.deck.revision }) });
   assert.equal((await outside.json()).code, 'invalid');
 
