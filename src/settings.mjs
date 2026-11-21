@@ -4,6 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 const SCENES = new Set(['aquarium', 'fire', 'rain', 'beach']);
+const RIGHT_ROCKER = ['brightness', 'volume'];
+// Sections added after the first release. A default is filled in when reading, but
+// written back only if the file already had it or the change names it, so a file
+// that never used a section stays readable by older builds (e.g. when switching branches).
+const OPTIONAL_SECTIONS = ['rockers'];
 const DEFAULTS = Object.freeze({
   version: 1,
   language: 'ko',
@@ -11,6 +16,8 @@ const DEFAULTS = Object.freeze({
   // Null preserves the device's current brightness at startup.
   brightness: null,
   screensaver: Object.freeze({ enabled: false, idleMinutes: 15, scene: 'aquarium' }),
+  // XL right rocker (#34): what up/down/push do. The default keeps the brightness steps.
+  rockers: Object.freeze({ right: 'brightness' }),
 });
 const copy = value => structuredClone(value);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -33,9 +40,14 @@ function checkRecord(value, keys, parent = '') {
 }
 
 function validate(value, partial = false) {
-  checkRecord(value, ['version', 'language', 'sound', 'brightness', 'screensaver']);
+  checkRecord(value, ['version', 'language', 'sound', 'brightness', 'screensaver', 'rockers']);
   if ((!partial || Object.hasOwn(value, 'version')) && value.version !== 1) throw invalid('version', [1], 'version 값은 1이어야 합니다.');
   if (Object.hasOwn(value, 'language') && !['ko', 'en'].includes(value.language)) throw invalid('language', ['ko', 'en'], "language 값은 'ko' 또는 'en'이어야 합니다.");
+  // Optional even in a full file: files written before this setting existed stay valid.
+  if (Object.hasOwn(value, 'rockers')) {
+    checkRecord(value.rockers, ['right'], 'rockers');
+    if (Object.hasOwn(value.rockers, 'right') && !RIGHT_ROCKER.includes(value.rockers.right)) throw invalid('rockers.right', RIGHT_ROCKER, `rockers.right 값은 ${RIGHT_ROCKER.join(', ')} 중 하나여야 합니다.`);
+  }
   if (!partial || Object.hasOwn(value, 'sound')) {
     checkRecord(value.sound, ['enabled'], 'sound');
     if ((!partial || Object.hasOwn(value.sound, 'enabled')) && typeof value.sound.enabled !== 'boolean') throw invalid('sound.enabled', [true, false], 'sound.enabled 값은 true 또는 false여야 합니다.');
@@ -61,9 +73,9 @@ async function readConfig(filename) {
     let parsed;
     try { parsed = JSON.parse(bytes.toString('utf8')); } catch { throw new SettingsError('settings_invalid_json', null, null, '설정 파일이 올바른 JSON이 아닙니다. 파일은 변경되지 않았습니다.'); }
     validate(parsed);
-    return { value: { language: 'ko', ...parsed }, bytes };
+    return { stored: new Set(Object.keys(parsed)), value: { language: 'ko', rockers: copy(DEFAULTS.rockers), ...parsed, rockers: { ...DEFAULTS.rockers, ...(parsed.rockers || {}) } }, bytes };
   } catch (error) {
-    if (error.code === 'ENOENT') return { value: copy(DEFAULTS), bytes: null };
+    if (error.code === 'ENOENT') return { value: copy(DEFAULTS), bytes: null, stored: new Set() };
     throw error;
   } finally { await handle?.close(); }
 }
@@ -81,6 +93,7 @@ function merge(current, patch) {
     ...patch,
     sound: { ...current.sound, ...(patch.sound || {}) },
     screensaver: { ...current.screensaver, ...(patch.screensaver || {}) },
+    rockers: { ...current.rockers, ...(patch.rockers || {}) },
   };
   validate(next);
   return next;
@@ -112,7 +125,9 @@ export function createSettings({ home = os.homedir(), file = path.join(home, '.c
         let handle;
         try {
           handle = await fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-          await handle.writeFile(`${JSON.stringify(next, null, 2)}\n`, 'utf8');
+          const output = { ...next };
+          for (const key of OPTIONAL_SECTIONS) if (!current.stored.has(key) && !Object.hasOwn(patch, key)) delete output[key];
+          await handle.writeFile(`${JSON.stringify(output, null, 2)}\n`, 'utf8');
           await handle.sync();
           await handle.close(); handle = undefined;
           const check = await readConfig(file);
