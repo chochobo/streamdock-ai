@@ -44,6 +44,7 @@ export const PROFILES = Object.freeze({
     rotate: -90,
     // Display-only screens next to the keys, in top-to-bottom order.
     sideSlots: [16, 17, 18],
+    ledCount: 0,
     rockers: {},
     slotOf: index => KEY_IDS_293S[index],
     indexOfCode: code => KEY_IDS_293S.indexOf(code),
@@ -60,6 +61,8 @@ export const PROFILES = Object.freeze({
     imageSize: 80,
     rotate: 180,
     sideSlots: [],
+    // RGB LEDs (issue #35); the 293S V3 has none.
+    ledCount: 6,
     rockers: ROCKERS_XL,
     // Image slot 1 is bottom-left; slots run left to right, then upward.
     slotOf: index => (3 - Math.floor(index / 8)) * 8 + (index % 8) + 1,

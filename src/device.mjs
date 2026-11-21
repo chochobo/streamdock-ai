@@ -21,6 +21,29 @@ export function commandPacket(command) {
   return packet;
 }
 
+// XL RGB LEDs (#35). The vendor SDK names these commands but ships the bytes
+// only in a closed library; this layout comes from third-party reverse
+// engineering (teras/keydeck PROTOCOL.md) and is NOT verified on an XL yet.
+// Like every command: "CRT" 00 00, then the name at data offset 5 and its
+// parameters at offset 10. If a real device disagrees, fix it here only.
+export const LED_COMMANDS = Object.freeze({ brightness: 'LBLIG', color: 'SETLB', reset: 'DELED' });
+const intIn = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
+export const ledPackets = Object.freeze({
+  /** 0..100. 0 turns the LEDs off (an all-zero color is ignored by the device). */
+  brightness(percent) {
+    if (!intIn(percent, 0, 100)) throw new RangeError('LED brightness must be an integer from 0 to 100');
+    return [commandPacket([...Buffer.from(LED_COMMANDS.brightness, 'ascii'), percent])];
+  },
+  /** One R,G,B triple repeated for every LED. */
+  color(rgb, count) {
+    if (!Array.isArray(rgb) || rgb.length !== 3 || !rgb.every(value => intIn(value, 0, 255))) throw new RangeError('LED color must be three integers from 0 to 255');
+    if (!intIn(count, 1, 16)) throw new RangeError('Invalid LED count');
+    return [commandPacket([...Buffer.from(LED_COMMANDS.color, 'ascii'), ...Array.from({ length: count }).flatMap(() => rgb)])];
+  },
+  /** Back to the device's own effect. */
+  reset() { return [commandPacket([...Buffer.from(LED_COMMANDS.reset, 'ascii')])]; },
+});
+
 export function imagePackets(id, jpeg) {
   if (!Number.isInteger(id) || id < 1 || id > MAX_SLOT || !jpeg.length || jpeg.length > 10240) throw new Error('Invalid key image');
   const header = Buffer.alloc(8);
@@ -297,6 +320,8 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
   let profile = initialProfile;
   let state = { connected: false, model: mode === 'simulator' ? 'Simulator' : modelName(profile, profile.vendorId, profile.productIds[0]), error: null, mode };
   let handle, sharp, heartbeat, starting;
+  // Counts successful connections; the LED sync re-applies its state after a reconnect.
+  let epoch = 0;
   let queue = Promise.resolve();
   const sent = new Map();
   const sentSummary = new Map();
@@ -442,6 +467,7 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
         sent.clear();
         sentSummary.clear();
         state = { ...state, connected: true, error: null };
+        epoch++;
         heartbeat = setInterval(() => {
           const task = queue.then(async () => {
             await send(commandPacket([...Buffer.from('CONNECT')]));
@@ -467,6 +493,34 @@ export function createDevice({ mode = 'simulator', profile: initialProfile = PRO
       if (state.connected) state = { ...state, requestedBrightness: percent };
       return state.connected;
     },
+    /**
+     * Show a color on every LED (rgb) at a brightness, or turn them off (rgb null,
+     * brightness 0). XL only; other models and the simulator return false.
+     */
+    async setLeds({ rgb, brightness }) {
+      if (rgb !== null && !(Array.isArray(rgb) && rgb.length === 3 && rgb.every(value => intIn(value, 0, 255)))) throw new RangeError('LED color must be null or three integers from 0 to 255');
+      if (rgb !== null && rgb.every(value => value === 0)) throw new RangeError('An all-zero LED color is ignored by the device; use brightness 0 to turn the LEDs off');
+      if (!intIn(brightness, 0, 100)) throw new RangeError('LED brightness must be an integer from 0 to 100');
+      if (mode !== 'hardware' || !handle || profile.ledCount < 1 || !state.connected) return false;
+      // The color first, then the brightness: the old color never shows at the new level.
+      const packets = [...(rgb === null ? [] : ledPackets.color(rgb, profile.ledCount)), ...ledPackets.brightness(brightness)];
+      // An LED write that fails is not a lost connection: keys keep working, and a real
+      // disconnect is noticed by the next render or heartbeat.
+      const task = queue.then(async () => { for (const packet of packets) await send(packet); });
+      queue = task.catch(() => {});
+      try { await task; } catch { return false; }
+      return state.connected;
+    },
+    /** Give the LEDs back to the device's own effect. */
+    async resetLeds() {
+      if (mode !== 'hardware' || !handle || profile.ledCount < 1 || !state.connected) return false;
+      const task = queue.then(async () => { for (const packet of ledPackets.reset()) await send(packet); });
+      queue = task.catch(() => {});
+      try { await task; } catch { return false; }
+      return state.connected;
+    },
+    /** Changes on every successful (re)connection. */
+    connectionEpoch() { return epoch; },
     async render(keys) {
       if (mode !== 'hardware' || !handle) return false;
       const task = queue.then(async () => {
